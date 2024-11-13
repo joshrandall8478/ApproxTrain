@@ -34,6 +34,12 @@ else
 	MULTIPLIER_CPPFLAG = -D $(MULTIPLIER)=1
 endif
 
+ifeq ($(ADD_ROUNDING),)
+	ADD_ROUNDING_CPPFLAG = 
+else
+	ADD_ROUNDING_CPPFLAG = -D $(ADD_ROUNDING)=1
+endif
+
 .PHONY: clean test
 
 all: $(CONV_BINARY) $(DENSE_BINARY) $(MATMUL_BINARY)
@@ -59,26 +65,26 @@ test_bin: $(CONV_OBJ)
 
 
 matmulam.o: matmulam.cc matmulam.h
-	$(CXX) $(CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $< -c -o $@
+	$(CXX) $(CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $(ADD_ROUNDING_CPPFLAG) $< -c -o $@
 
 convam.o: convam.cc convam.h
-	$(CXX) $(CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $< -c -o $@
+	$(CXX) $(CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $(ADD_ROUNDING_CPPFLAG) $< -c -o $@
 denseam.o: denseam.cc denseam.h 
-	$(CXX) $(CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $< -c -o $@
+	$(CXX) $(CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $(ADD_ROUNDING_CPPFLAG) $< -c -o $@
 
 # header deps
 mul_inc_deps = cuda/AMsimulator.inl 
 
 # cuda stuff
 denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) 
-	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) -c $< -o $@
+	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $(ADD_ROUNDING_CPPFLAG) -c $< -o $@
 matmulam_kernel.cu.o: cuda/matmulam_kernel.cu cuda/error.cuh cuda/gemm.cuh 
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@
 cuda_kernel.cu.o: cuda/cuda_kernel.cu cuda/gpu_kernel_helper.h cuda/error.cuh cuda/gemm.cuh cuda/reverseNswapdim23.cuh 
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) --expt-relaxed-constexpr -c $< -o $@
 
 gemm.cu.o: cuda/gemm.cu $(mul_inc_deps)
-	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) -c $< -o $@
+	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $(ADD_ROUNDING_CPPFLAG) -c $< -o $@
 
 reverseNswapdim23.cu.o: cuda/reverseNswapdim23.cu
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@

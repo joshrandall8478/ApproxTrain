@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <math.h>
-
+#include <cuda_fp16.h>
 #include "tensorflow/core/framework/types.h"
 using namespace tensorflow;
 
@@ -12,7 +12,21 @@ using namespace tensorflow;
 #else
    #define MULTIPLY(a,b) ((a)*(b));
 #endif
+
+
 #define TILE_DIM 16
+/*
+    Goal is to setup SEA emulation with (FP16,FP32), (BF16,FP32), (E4M3, FP32), (E5M2, FP32)
+    Poritise (BF16, FP32), then somehow we generalise implementation
+*/
+
+#ifdef RTZ
+    #define fp32_add(a,b) __fadd_rz((a), (b));
+#else
+    #define fp32_add(a,b) ((a)+(b));
+#endif
+
+
 template <typename T>
 __global__ void gemm(size_t m, size_t n, size_t k,
     const T *a, size_t lda, const T *b, size_t ldb,
@@ -46,7 +60,8 @@ __global__ void gemm(size_t m, size_t n, size_t k,
         __syncthreads();
 
         for (int n = 0; n < TILE_DIM; ++n){
-            value += MULTIPLY(As[threadIdx.y][n],Bs[n][threadIdx.x]);
+            T mul = MULTIPLY(As[threadIdx.y][n], Bs[n][threadIdx.x]);
+            value = fp32_add(mul, value);
         }
 
         __syncthreads();
@@ -65,3 +80,5 @@ template __global__ void gemm<int32>(size_t m, size_t n, size_t k,
     const int32 *a, size_t lda, const int32 *b, size_t ldb,
    int32 *c, size_t ldc, cudaTextureObject_t mant_lut,
    uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth);
+
+
