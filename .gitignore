@@ -79,3 +79,5 @@ sparsity_acc_all
 lut/*.bin
 *.bin
 *.pdf
+seavenv
+*.out
