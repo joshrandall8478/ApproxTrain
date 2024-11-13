@@ -81,3 +81,4 @@ lut/*.bin
 *.pdf
 seavenv
 *.out
+save/
