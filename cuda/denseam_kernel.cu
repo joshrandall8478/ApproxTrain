@@ -14,6 +14,12 @@ using GpuDevice = Eigen::GpuDevice;
    #define MULTIPLY(a,b) ((a)*(b));
 #endif
 
+#ifdef RTZ
+    #define fp32_add(a,b) __fadd_rz((a), (b));
+#else
+    #define fp32_add(a,b) ((a)+(b));
+#endif
+
 
 template <typename T>
 __global__ void DenseamKernel(
@@ -37,7 +43,8 @@ __global__ void DenseamKernel(
         output[ix] = T(0);
         for (int ix_input = 0; ix_input < input_width; ix_input++)
         {
-          output[ix] += MULTIPLY(inputs[ix_sample*input_width+ix_input], weights[ix_input*units+ix_unit]);
+          T mul = MULTIPLY(inputs[ix_sample*input_width+ix_input], weights[ix_input*units+ix_unit]);
+          output[ix] = fp32_add(mul, output[ix]);
         }  
     }
 };
@@ -63,7 +70,8 @@ __global__ void DenseamWeightsKernel(
         grad_weights[ix] = T(0);
         for (int ix_sample = 0; ix_sample < batch; ix_sample++)
         {
-           grad_weights[ix] += MULTIPLY(inputs[input_width*ix_sample+ix_input], grads[ix_sample*units+ix_unit]);
+           T mul = MULTIPLY(inputs[input_width*ix_sample+ix_input], grads[ix_sample*units+ix_unit]);
+           grad_weights[ix] = fp32_add(mul, grad_weights[ix]);
         }  
     }
 };
@@ -89,8 +97,9 @@ __global__ void DenseamInputKernel(
         grad_inputs[ix] = T(0);
 
         for (int ix_unit = 0; ix_unit < units; ix_unit++)
-        {
-			grad_inputs[ix_sample*input_width+ix_input] += MULTIPLY(weights[ix_input*units+ ix_unit], grads[ix_sample*units+ix_unit]);
+        {        
+            T mul = MULTIPLY(weights[ix_input*units+ ix_unit], grads[ix_sample*units+ix_unit]);
+            grad_inputs[ix_sample*input_width+ix_input] = fp32_add(mul, grad_inputs[ix_sample*input_width+ix_input]);
         }  
     }
 };

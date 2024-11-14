@@ -29,7 +29,12 @@
     ├── mnist_example.py            # quick test
     ├── mnist_prunning_example.py   # mnist prunning example
     ├── prunning_script.sh          # script to run prunning
-    └── prunning_plotting.py        # plot pruning result
+    ├── prunning_plotting.py        # plot pruning result
+    ├── mnist_mult_gpus.py          # mnist multi-gpu training with parser
+    ├── rnd_run_all.sh              # script that run mnist_mult_gpus.py
+    ├── train_stats.py              # python script that report training stats
+    └── 
+
         
         
 ```

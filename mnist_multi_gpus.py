@@ -8,15 +8,19 @@ from python.keras.layers.am_convolutional import AMConv2D
 from python.keras.layers.amdenselayer import denseam
 
 # Set up argument parser
-parser = argparse.ArgumentParser(description="Train a model with customizable SEED and LUT file.")
+parser = argparse.ArgumentParser(description="Train a model with customizable SEED, LUT file, EPOCH, and EARLYSTOPPING.")
 parser.add_argument("--SEED", type=int, default=0, help="Random seed for reproducibility")
 parser.add_argument("--LUT", type=str, required=True, help="Path to the LUT file")
+parser.add_argument("--EPOCH", type=int, default=20, help="Number of training epochs")
+parser.add_argument("--EARLYSTOPPING", type=bool, default=True, help="Enable early stopping (True/False)")
+parser.add_argument("--ROUNDING", type=str, required=True, help="THIS ROUNDING DOES NOT HAVE ACUTAL EFFECT, YOU HAVE TO RECOMPILE CUDA, THIS IS FOR THE SAKE OF DATA COLLECTION")
 args = parser.parse_args()
 
-basename = os.path.basename(args.LUT)  # This gives "XXX_X.bin"
+# Extract the LUT filename (XXX_X) for use in saving files
+basename = os.path.basename(args.LUT)
 match = re.match(r"(.+)\.bin$", basename)
-lut_file_name = match.group(1)
-
+lut_file_name = match.group(1) if match else "default"
+rnd = args.ROUNDING
 
 # Set random seed
 tf.random.set_seed(args.SEED)
@@ -40,7 +44,7 @@ lut_file = args.LUT
 # Prepare the training dataset
 ds_train = ds_train.map(normalize_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 ds_train = ds_train.cache()
-ds_train = ds_train.shuffle(int(ds_info.splits['train'].num_examples * 0.8))  # Shuffle only 80% of the data
+ds_train = ds_train.shuffle(int(ds_info.splits['train'].num_examples * 0.8))
 ds_train = ds_train.batch(128)
 ds_train = ds_train.prefetch(tf.data.experimental.AUTOTUNE)
 
@@ -78,30 +82,40 @@ with strategy.scope():
         metrics=[tf.keras.metrics.SparseCategoricalAccuracy()],
     )
 
+# Ensure directories exist for saving checkpoints and statistics
+os.makedirs("save/checkpoints", exist_ok=True)
+os.makedirs("save/training_stats", exist_ok=True)
 
 # Define a callback for saving the best model based on validation accuracy
+checkpoint_callback_file_path = f"save/checkpoints/lenet5_mnist_{lut_file_name}_{rnd}.h5"
+if args.EARLYSTOPPING:
+    checkpoint_callback_file_path = f"save/checkpoints/lenet5_mnist_{lut_file_name}_earlystopping_{rnd}.h5"
+
 checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-    filepath=f"save/checkpoints/lenet5_mnist_{lut_file_name}.h5",
+    filepath=checkpoint_callback_file_path,
     monitor='val_sparse_categorical_accuracy',
     save_best_only=True,
     save_weights_only=True,
     verbose=1
 )
 
-# Define early stopping callback
-early_stopping_callback = tf.keras.callbacks.EarlyStopping(
-    monitor='val_loss',
-    patience=3,  # Stop if validation loss doesn’t improve for 3 epochs
-    restore_best_weights=True,
-    verbose=1
-)
+# Define early stopping callback if EARLYSTOPPING is enabled
+callbacks = [checkpoint_callback]
+if args.EARLYSTOPPING:
+    early_stopping_callback = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=3,
+        restore_best_weights=True,
+        verbose=1
+    )
+    callbacks.append(early_stopping_callback)
 
 # Train the model with distributed strategy and callbacks
 history = model.fit(
     ds_train,
-    epochs=1,  # Increase the epochs if needed
+    epochs=args.EPOCH,
     validation_data=ds_val,
-    callbacks=[checkpoint_callback, early_stopping_callback],
+    callbacks=callbacks,
 )
 
 # Evaluate the model on the test set
@@ -117,8 +131,11 @@ training_stats = {
     "test_loss": test_loss,
     "test_accuracy": test_accuracy,
 }
+training_stats_file_path = f"save/training_stats/lenet5_mnist_{lut_file_name}_{rnd}.json"
+if args.EARLYSTOPPING:
+    training_stats_file_path = f"save/training_stats/lenet5_mnist_{lut_file_name}_earlystopping_{rnd}.json"
 
-with open(f"save/training_stats/lenet5_mnist_{lut_file_name}.json", "w") as f:
+with open(training_stats_file_path, "w") as f:
     json.dump(training_stats, f)
 
-print(f"Training statistics saved to save/training_stats/lenet5_mnist_{lut_file_name}.json")
+print(f"Training statistics saved to {training_stats_file_path}")
