@@ -56,3 +56,5 @@ for lut_file in "${lut_files[@]}"; do
 done
 
 echo "All experiments completed."
+
+

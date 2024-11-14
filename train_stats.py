@@ -2,7 +2,7 @@ import os
 import json
 
 # Directory containing the JSON files
-stats_dir = "training_stats"
+stats_dir = "save/training_stats"
 
 # Loop through each JSON file in the directory
 for filename in os.listdir(stats_dir):

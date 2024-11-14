@@ -20,6 +20,20 @@ using GpuDevice = Eigen::GpuDevice;
     #define fp32_add(a,b) ((a)+(b));
 #endif
 
+/*
+    The following is for half precision that accumulate in FP32
+*/
+
+
+// Convert FP32 to FP16
+__device__ __half fp32_to_fp16(float a) {
+    return __float2half(a);
+}
+
+// Convert FP16 back to FP32
+__device__ float fp16_to_fp32(__half a) {
+    return __half2float(a);
+}
 
 template <typename T>
 __global__ void DenseamKernel(
@@ -43,8 +57,18 @@ __global__ void DenseamKernel(
         output[ix] = T(0);
         for (int ix_input = 0; ix_input < input_width; ix_input++)
         {
-          T mul = MULTIPLY(inputs[ix_sample*input_width+ix_input], weights[ix_input*units+ix_unit]);
-          output[ix] = fp32_add(mul, output[ix]);
+          #ifdef FP16MUL
+                // Convert to FP16, perform multiplication, convert back to FP32
+                __half a_fp16 = fp32_to_fp16(inputs[ix_sample*input_width+ix_input]);
+                __half b_fp16 = fp32_to_fp16(weights[ix_input*units+ix_unit]);
+                float mul_fp32 = fp16_to_fp32(__hmul(a_fp16, b_fp16));
+
+                // Accumulate in FP32
+                output[ix] = fp32_add(mul_fp32, output[ix]);
+          #else
+            T mul = MULTIPLY(inputs[ix_sample*input_width+ix_input], weights[ix_input*units+ix_unit]);
+            output[ix] = fp32_add(mul, output[ix]);
+          #endif
         }  
     }
 };
@@ -70,8 +94,18 @@ __global__ void DenseamWeightsKernel(
         grad_weights[ix] = T(0);
         for (int ix_sample = 0; ix_sample < batch; ix_sample++)
         {
-           T mul = MULTIPLY(inputs[input_width*ix_sample+ix_input], grads[ix_sample*units+ix_unit]);
-           grad_weights[ix] = fp32_add(mul, grad_weights[ix]);
+            #ifdef FP16MUL
+                // Convert to FP16, perform multiplication, convert back to FP32
+                __half a_fp16 = fp32_to_fp16(inputs[input_width*ix_sample+ix_input]);
+                __half b_fp16 = fp32_to_fp16(grads[ix_sample*units+ix_unit]);
+                float mul_fp32 = fp16_to_fp32(__hmul(a_fp16, b_fp16));
+
+                // Accumulate in FP32
+                grad_weights[ix] = fp32_add(mul_fp32, grad_weights[ix]);
+            #else
+                T mul = MULTIPLY(inputs[input_width*ix_sample+ix_input], grads[ix_sample*units+ix_unit]);
+                grad_weights[ix] = fp32_add(mul, grad_weights[ix]);
+            #endif
         }  
     }
 };
@@ -97,10 +131,20 @@ __global__ void DenseamInputKernel(
         grad_inputs[ix] = T(0);
 
         for (int ix_unit = 0; ix_unit < units; ix_unit++)
-        {        
-            T mul = MULTIPLY(weights[ix_input*units+ ix_unit], grads[ix_sample*units+ix_unit]);
-            grad_inputs[ix_sample*input_width+ix_input] = fp32_add(mul, grad_inputs[ix_sample*input_width+ix_input]);
-        }  
+        {   
+            #ifdef FP16MUL
+                // Convert to FP16, perform multiplication, convert back to FP32
+                __half a_fp16 = fp32_to_fp16(weights[ix_input*units+ ix_unit]);
+                __half b_fp16 = fp32_to_fp16(grads[ix_sample*units+ix_unit]);
+                float mul_fp32 = fp16_to_fp32(__hmul(a_fp16, b_fp16));
+
+                // Accumulate in FP32
+                grad_inputs[ix_sample*input_width+ix_input] = fp32_add(mul_fp32, grad_inputs[ix_sample*input_width+ix_input]);
+            #else
+                T mul = MULTIPLY(weights[ix_input*units+ ix_unit], grads[ix_sample*units+ix_unit]);
+                grad_inputs[ix_sample*input_width+ix_input] = fp32_add(mul, grad_inputs[ix_sample*input_width+ix_input]);
+            #endif 
+        }
     }
 };
 template <typename T>
