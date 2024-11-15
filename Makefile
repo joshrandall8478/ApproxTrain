@@ -20,6 +20,7 @@ CUDA_ROOT = /usr/local/cuda
 CUDA_LIB ?= $(CUDA_ROOT)/lib64
 CONV_CUDA_OBJ = cuda_kernel.cu.o  gemm.cu.o reverseNswapdim23.cu.o approx_mul_lut.cu.o 
 NVCC ?= nvcc
+CUDA_ARCH = -gencode arch=compute_61,code=sm_61  # Set to sm_61 for GTX 1080
 CUDA_CFLAGS += -g  -O2 -std=c++11 $(CUDA_ARCH) -Xcompiler -Wall -Xcompiler -fPIC  -Xcudafe --diag_suppress=esa_on_defaulted_function_ignored --expt-relaxed-constexpr
 CUDA_LDFLAGS = -L$(CUDA_LIB) -lcudart
 CONV_OBJ += $(CONV_CUDA_OBJ)
@@ -28,22 +29,16 @@ DENSE_OBJ += $(DENSE_CUDA_OBJ)
 MATMUL_CUDA_OBJ = matmulam_kernel.cu.o gemm.cu.o approx_mul_lut.cu.o 
 MATMUL_OBJ += $(MATMUL_CUDA_OBJ)
 
-ifeq  ($(MULTIPLIER),)
-    MULTIPLIER_CPPFLAG =
-else
-	MULTIPLIER_CPPFLAG = -D $(MULTIPLIER)=1
+ifneq ($(MULTIPLIER),)
+    MULTIPLIER_CPPFLAG = -D$(MULTIPLIER)=1
 endif
 
-ifeq ($(ADD_ROUNDING),)
-	ADD_ROUNDING_CPPFLAG = 
-else
-	ADD_ROUNDING_CPPFLAG = -D $(ADD_ROUNDING)=1
+ifneq ($(ADD_ROUNDING),)
+	ADD_ROUNDING_CPPFLAG = -D$(ADD_ROUNDING)=1
 endif
 
-ifeq ($(FP16TRAINING),)
-	FP16TRAINING_CPPFLAG = 
-else
-	FP16TRAINING_CPPFLAG = -D $(FP16MUL)=1
+ifneq ($(FP16TRAINING),)
+	FP16TRAINING_CPPFLAG = -D$(FP16TRAINING)=1
 endif
 
 .PHONY: clean test

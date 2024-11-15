@@ -8,18 +8,27 @@ from python.keras.layers.am_convolutional import AMConv2D
 from python.keras.layers.amdenselayer import denseam
 
 # Set up argument parser
-parser = argparse.ArgumentParser(description="Train a model with customizable SEED, LUT file, EPOCH, and EARLYSTOPPING.")
+parser = argparse.ArgumentParser(description="Train a model with customizable SEED, LUT file, EPOCH, EARLYSTOPPING, and FP16 support.")
 parser.add_argument("--SEED", type=int, default=0, help="Random seed for reproducibility")
-parser.add_argument("--LUT", type=str, required=True, help="Path to the LUT file")
+parser.add_argument("--LUT", type=str, help="Path to the LUT file (ignored if FP16 is enabled)")
 parser.add_argument("--EPOCH", type=int, default=20, help="Number of training epochs")
-parser.add_argument("--EARLYSTOPPING", type=bool, default=True, help="Enable early stopping (True/False)")
-parser.add_argument("--ROUNDING", type=str, required=True, help="THIS ROUNDING DOES NOT HAVE ACUTAL EFFECT, YOU HAVE TO RECOMPILE CUDA, THIS IS FOR THE SAKE OF DATA COLLECTION")
+parser.add_argument("--EARLYSTOPPING", action='store_true', help="Enable early stopping")
+parser.add_argument("--ROUNDING", type=str, required=True, help="Rounding mode for data collection")
+parser.add_argument("--FP16", action='store_true', help="Use FP16 mode (ignores LUT files)")
 args = parser.parse_args()
 
-# Extract the LUT filename (XXX_X) for use in saving files
-basename = os.path.basename(args.LUT)
-match = re.match(r"(.+)\.bin$", basename)
-lut_file_name = match.group(1) if match else "default"
+# Check that LUT is provided unless FP16 is enabled
+if not args.FP16 and not args.LUT:
+    parser.error("Argument --LUT is required unless --FP16 is specified")
+
+# Determine LUT filename or set to "FP16" if FP16 mode is enabled
+if args.FP16:
+    lut_file_name = "FP16"
+    lut_file = "lut/ZEROS_7.bin"
+else:
+    lut_file_name = re.match(r"(.+)\.bin$", os.path.basename(args.LUT)).group(1) if args.LUT else "default"
+    lut_file = args.LUT
+
 rnd = args.ROUNDING
 
 # Set random seed
@@ -38,8 +47,7 @@ def normalize_img(image, label):
     """Normalizes images: `uint8` -> `float32`."""
     return tf.cast(image, tf.float32) / 255., label
 
-# Configure dataset for performance
-lut_file = args.LUT
+
 
 # Prepare the training dataset
 ds_train = ds_train.map(normalize_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -86,11 +94,12 @@ with strategy.scope():
 os.makedirs("save/checkpoints", exist_ok=True)
 os.makedirs("save/training_stats", exist_ok=True)
 
-# Define a callback for saving the best model based on validation accuracy
+# Define checkpoint file path based on LUT filename or FP16 mode
 checkpoint_callback_file_path = f"save/checkpoints/lenet5_mnist_{lut_file_name}_{rnd}.h5"
 if args.EARLYSTOPPING:
     checkpoint_callback_file_path = f"save/checkpoints/lenet5_mnist_{lut_file_name}_earlystopping_{rnd}.h5"
 
+# Define a callback for saving the best model based on validation accuracy
 checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
     filepath=checkpoint_callback_file_path,
     monitor='val_sparse_categorical_accuracy',
@@ -131,6 +140,8 @@ training_stats = {
     "test_loss": test_loss,
     "test_accuracy": test_accuracy,
 }
+
+# Define training statistics file path
 training_stats_file_path = f"save/training_stats/lenet5_mnist_{lut_file_name}_{rnd}.json"
 if args.EARLYSTOPPING:
     training_stats_file_path = f"save/training_stats/lenet5_mnist_{lut_file_name}_earlystopping_{rnd}.json"

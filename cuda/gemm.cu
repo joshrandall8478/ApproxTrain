@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <math.h>
-#include <cuda_fp16.h>
 #include "tensorflow/core/framework/types.h"
+#include <cuda_fp16.h>
 using namespace tensorflow;
 
 #ifdef AMSIMULATOR

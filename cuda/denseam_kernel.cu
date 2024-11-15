@@ -4,7 +4,7 @@
 #include "error.cuh"
 #include "denseam.h"
 #include "approx_mul_lut.h"
-
+#include <cuda_fp16.h>
 using namespace tensorflow;
 using GpuDevice = Eigen::GpuDevice;
 #ifdef AMSIMULATOR
