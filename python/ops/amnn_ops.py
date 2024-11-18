@@ -92,7 +92,8 @@ def amconvolution_internal(
     name=None,
     call_from_convolution=True,
     num_spatial_dims=None,
-    mant_mul_lut=''
+    mant_mul_lut='',
+    fp8=False
     ):
   """Internal function which performs rank agnostic convolution.
 
@@ -191,7 +192,8 @@ def amconvolution_internal(
           data_format=data_format,
           dilations=dilations,
           name=name,
-          mant_mul_lut=mant_mul_lut
+          mant_mul_lut=mant_mul_lut,
+          fp8=fp8
           )
     else:
         raise ValueError("Dilation is not supported in current implementation")
@@ -206,7 +208,8 @@ def amconvolution_v2(  # pylint: disable=missing-docstring
     data_format=None,
     dilations=None,
     name=None,
-    mant_mul_lut=''):
+    mant_mul_lut='',
+    fp8=False):
   return amconvolution_internal(
       input,  # pylint: disable=redefined-builtin
       filters,
@@ -215,7 +218,8 @@ def amconvolution_v2(  # pylint: disable=missing-docstring
       data_format=data_format,
       dilations=dilations,
       name=name,
-      mant_mul_lut=mant_mul_lut)
+      mant_mul_lut=mant_mul_lut,
+      fp8=fp8)
 
 @ops.RegisterGradient("Convam")
 def _convam_grad_cc(op,grad):
@@ -225,6 +229,7 @@ def _convam_grad_cc(op,grad):
   padding = op.get_attr("padding")
   data_format = op.get_attr("data_format")
   mant_mul_lut = op.get_attr("mant_mul_lut")
+  fp8 = op.get_attr("fp8")
   # shape_0 input shape_1 filter
   shape_0 = array_ops.shape(op.inputs[0])
   shape_1 = array_ops.shape(op.inputs[1])
@@ -233,12 +238,14 @@ def _convam_grad_cc(op,grad):
           strides=strides,
           padding=padding,
           data_format=data_format,
-          mant_mul_lut=mant_mul_lut
+          mant_mul_lut=mant_mul_lut,
+          fp8=fp8
           ),
           convam_module.convam_filter_grad(shape_1,op.inputs[0], grad,
           dilations=dilations,
           strides=strides,
           padding=padding,
           data_format=data_format,
-          mant_mul_lut=mant_mul_lut
+          mant_mul_lut=mant_mul_lut,
+          fp8=fp8
           )]
