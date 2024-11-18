@@ -135,6 +135,7 @@ class AMConv(Layer):
                name=None,
                conv_op=None,
                mant_mul_lut='', 
+               fp8=False,
                **kwargs):
     super(AMConv, self).__init__(
         trainable=trainable,
@@ -173,8 +174,9 @@ class AMConv(Layer):
     self._is_causal = self.padding == 'causal'
     self._channels_first = self.data_format == 'channels_first'
     self._tf_data_format = conv_utils.convert_data_format(
-        self.data_format, self.rank + 2)
+    self.data_format, self.rank + 2)
     self.mant_mul_lut = mant_mul_lut
+    self.fp8 = fp8
     #print(self.mant_mul_lut," lvl 1")
 
   def _validate_init(self):
@@ -253,6 +255,7 @@ class AMConv(Layer):
         dilations=tf_dilations,
         data_format=self._tf_data_format,
         mant_mul_lut=self.mant_mul_lut,
+        fp8=self.fp8
         name=tf_op_name)
     self.built = True
 
@@ -355,7 +358,9 @@ class AMConv(Layer):
         'bias_constraint':
             constraints.serialize(self.bias_constraint),
         'mant_mul_lut':
-            self.mant_mul_lut
+            self.mant_mul_lut,
+        'fp8':
+            self.fp8
     }
     base_config = super(AMConv, self).get_config()
     return dict(list(base_config.items()) + list(config.items()))
@@ -535,6 +540,7 @@ class AMConv2D(AMConv):
                kernel_constraint=None,
                bias_constraint=None,
                mant_mul_lut='', 
+               fp8=False,
                **kwargs):
     super(AMConv2D, self).__init__(
         rank=2,
@@ -555,6 +561,7 @@ class AMConv2D(AMConv):
         kernel_constraint=constraints.get(kernel_constraint),
         bias_constraint=constraints.get(bias_constraint),
         mant_mul_lut=mant_mul_lut,
+        fp8=fp8,
         **kwargs)
 
 
