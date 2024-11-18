@@ -53,6 +53,7 @@ REGISTER_OP("MatMulAM")
     .Attr("transpose_b: bool = false")
     .Attr("T: {float, int32}")
     .Attr("mant_mul_lut: string")
+    .Attr("fp8: bool = false")
     .SetShapeFn(shape_inference::MatMulShape);
 
 

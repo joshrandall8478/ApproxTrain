@@ -96,34 +96,38 @@ def matmulam(a,
           #    a=a, b=b, transpose_a=transpose_a, transpose_b=transpose_b, name=name)
 def _MatMulGradAgainstFirstOnly(op, grad):
   """Gradient for MatMul, only for the first input."""
+  mant_mul_lut = op.get_attr("mant_mul_lut")
+  fp8 = op.get_attr("fp8")
   t_a = op.get_attr("transpose_a")
   t_b = op.get_attr("transpose_b")
   b = math_ops.conj(op.inputs[1])
   if not t_a and not t_b:
     #grad_a = gen_matmulam.MatMulAM(grad, b, transpose_b=True)
-    grad_a = gen_matmulam.MatMulAM(grad, tf.linalg.matrix_transpose(b))
+    grad_a = gen_matmulam.MatMulAM(grad, tf.linalg.matrix_transpose(b), mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif not t_a and t_b:
-    grad_a = gen_matmulam.MatMulAM(grad, b)
+    grad_a = gen_matmulam.MatMulAM(grad, b, mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif t_a and not t_b:
-    grad_a = gen_matmulam.MatMulAM(b, tf.linalg.matrix_transpose(grad))
+    grad_a = gen_matmulam.MatMulAM(b, tf.linalg.matrix_transpose(grad), mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif t_a and t_b:
-    grad_a = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(b), tf.linalg.matrix_transpose(grad))
+    grad_a = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(b), tf.linalg.matrix_transpose(grad), mant_mul_lut = mant_mul_lut, fp8=fp8)
   return grad_a, None
 
 
 def _MatMulGradAgainstSecondOnly(op, grad):
   """Gradient for MatMul, only for the second input."""
+  mant_mul_lut = op.get_attr("mant_mul_lut")
+  fp8 = op.get_attr("fp8")
   t_a = op.get_attr("transpose_a")
   t_b = op.get_attr("transpose_b")
   a = math_ops.conj(op.inputs[0])
   if not t_a and not t_b:
-    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(a), grad)
+    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(a), grad, mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif not t_a and t_b:
-    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(grad), a)
+    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(grad), a, mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif t_a and not t_b:
-    grad_b = gen_matmulam.MatMulAM(a, grad)
+    grad_b = gen_matmulam.MatMulAM(a, grad, mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif t_a and t_b:
-    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(grad), tf.linalg.matrix_transpose(a))
+    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(grad), tf.linalg.matrix_transpose(a), mant_mul_lut = mant_mul_lut, fp8=fp8)
   return None, grad_b
 @ops.RegisterGradient("MatMulAM")
 def _MatMulGrad(op, grad):
@@ -143,16 +147,18 @@ def _MatMulGrad(op, grad):
   t_b = op.get_attr("transpose_b")
   a = math_ops.conj(op.inputs[0])
   b = math_ops.conj(op.inputs[1])
+  mant_mul_lut = op.get_attr("mant_mul_lut")
+  fp8 = op.get_attr("fp8")
   if not t_a and not t_b:
-    grad_a = gen_matmulam.MatMulAM(grad, tf.linalg.matrix_transpose(b))
-    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(a), grad)
+    grad_a = gen_matmulam.MatMulAM(grad, tf.linalg.matrix_transpose(b), mant_mul_lut = mant_mul_lut, fp8=fp8)
+    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(a), grad, mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif not t_a and t_b:
     grad_a = gen_matmulam.MatMulAM(grad, b)
-    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(grad), a)
+    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(grad), a, mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif t_a and not t_b:
-    grad_a = gen_matmulam.MatMulAM(b, tf.linalg.matrix_transpose(grad))
-    grad_b = gen_matmulam.MatMulAM(a, grad)
+    grad_a = gen_matmulam.MatMulAM(b, tf.linalg.matrix_transpose(grad), mant_mul_lut = mant_mul_lut, fp8=fp8)
+    grad_b = gen_matmulam.MatMulAM(a, grad, mant_mul_lut = mant_mul_lut, fp8=fp8)
   elif t_a and t_b:
-    grad_a = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(b), tf.linalg.matrix_transpose(grad))
-    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(grad), tf.linalg.matrix_transpose(a))
+    grad_a = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(b), tf.linalg.matrix_transpose(grad), mant_mul_lut = mant_mul_lut, fp8=fp8)
+    grad_b = gen_matmulam.MatMulAM(tf.linalg.matrix_transpose(grad), tf.linalg.matrix_transpose(a), mant_mul_lut = mant_mul_lut, fp8=fp8)
   return grad_a, grad_b

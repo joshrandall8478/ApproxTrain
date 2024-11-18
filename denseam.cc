@@ -39,6 +39,7 @@ REGISTER_OP("Denseam")
   .Output("output: T")
   .Attr("T: {float, int32}")
   .Attr("mant_mul_lut: string")
+  .Attr("fp8: bool = false")
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
 
    shape_inference::ShapeHandle input_shape;
