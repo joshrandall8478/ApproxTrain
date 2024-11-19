@@ -255,7 +255,7 @@ class AMConv(Layer):
         dilations=tf_dilations,
         data_format=self._tf_data_format,
         mant_mul_lut=self.mant_mul_lut,
-        fp8=self.fp8
+        fp8=self.fp8,
         name=tf_op_name)
     self.built = True
 

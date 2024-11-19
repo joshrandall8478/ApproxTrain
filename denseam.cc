@@ -182,7 +182,8 @@ REGISTER_OP("DenseamGrad")
   .Output("grad_input: T")
   .Output("grad_weights: T")
   .Attr("T: {float, int32}")
-  .Attr("mant_mul_lut: string");
+  .Attr("mant_mul_lut: string")
+  .Attr("fp8: bool = false");
 template<typename Device, typename T>
 class DenseamGradOp: public OpKernel {
 public:

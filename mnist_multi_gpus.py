@@ -74,14 +74,14 @@ strategy = tf.distribute.MirroredStrategy()
 with strategy.scope():
     model = tf.keras.models.Sequential([
         tf.keras.layers.Input(shape=(28, 28, 1)),
-        AMConv2D(filters=32, kernel_size=5, padding='same', activation='relu', mant_mul_lut=lut_file),
+        AMConv2D(filters=32, kernel_size=5, padding='same', activation='relu', mant_mul_lut=lut_file, fp8=True),
         tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='same'),
-        AMConv2D(filters=32, kernel_size=5, padding='same', activation='relu', mant_mul_lut=lut_file),
+        AMConv2D(filters=32, kernel_size=5, padding='same', activation='relu', mant_mul_lut=lut_file, fp8=True),
         tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='same'),
         tf.keras.layers.Flatten(),
-        denseam(1024, activation='relu', mant_mul_lut=lut_file),
+        denseam(1024, activation='relu', mant_mul_lut=lut_file, fp8=True),
         tf.keras.layers.Dropout(0.4),
-        denseam(10, activation='softmax', mant_mul_lut=lut_file)
+        denseam(10, activation='softmax', mant_mul_lut=lut_file, fp8=True)
     ])
 
     model.compile(
@@ -126,7 +126,7 @@ history = model.fit(
     validation_data=ds_val,
     callbacks=callbacks,
 )
-
+exit(0)
 # Evaluate the model on the test set
 test_loss, test_accuracy = model.evaluate(ds_test)
 print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")

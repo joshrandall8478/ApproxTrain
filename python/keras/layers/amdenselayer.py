@@ -253,7 +253,7 @@ class denseam(Layer):
             regularizers.serialize(self.activity_regularizer),
         'kernel_constraint': constraints.serialize(self.kernel_constraint),
         'bias_constraint': constraints.serialize(self.bias_constraint),
-        'mant_mul_lut': self.mant_mul_lut
+        'mant_mul_lut': self.mant_mul_lut,
         'fp8': self.fp8
     })
     return config
