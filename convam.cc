@@ -872,7 +872,7 @@ public:
             filter_height,
             out,
             mul_lut_,
-            fp8_,
+            fp8_
             );
   }
   private:

@@ -65,68 +65,6 @@ __global__ void Denseam_e4m3_Kernel(
     }
 };
 
-// Forward kernel for e5m2
-template <typename T>
-__global__ void Denseam_e5m2_Kernel(
-    const T* inputs,
-    const T* weights,
-    const int batch, 
-    const int units, 
-    const int input_width, 
-    T* output, 
-    cudaTextureObject_t lut) 
-{ 
-    unsigned int ix = blockIdx.x * blockDim.x + threadIdx.x; 
-    if(ix < units*batch)
-    {
-        int ix_unit = ix % units ;
-        int ix_sample = ix / units;
-        output[ix] = T(0);
-        for (int ix_input = 0; ix_input < input_width; ix_input++)
-        {
-            uint8_t a_key = fp32_to_e5m2(inputs[ix_sample*input_width+ix_input]);
-            uint8_t b_key = fp32_to_e5m2(weights[ix_input*units+ix_unit]);
-
-            uint32_t index = (a_key << 8) | b_key;
-
-            float mul_result = tex1Dfetch<float>(lut, index);
-
-            output[ix] += mul_result;
-        }  
-    }
-};
-
-// Backward kernel for weights, e4m3
-template <typename T>
-__global__ void DenseamWeights_e4m3_Kernel(
-    const T* grads,
-    const T* inputs,
-    const int input_width, 
-    const int batch, 
-    const int units, 
-    T* grad_weights,
-    cudaTextureObject_t lut) 
-{ 
-    unsigned int ix = blockIdx.x * blockDim.x + threadIdx.x; 
-    if(ix < units*input_width)
-    {
-        int ix_unit = ix % units ;
-        int ix_input = ix / units;
-        grad_weights[ix] = T(0);
-        for (int ix_sample = 0; ix_sample < batch; ix_sample++)
-        {
-            uint8_t a_key = fp32_to_e4m3(inputs[input_width*ix_sample+ix_input]);
-            uint8_t b_key = fp32_to_e4m3(grads[ix_sample*units+ix_unit]);
-
-            uint32_t index = (a_key << 8) | b_key;
-
-            float mul_result = tex1Dfetch<float>(lut, index);
-
-            grad_weights[ix] += mul_result;
-        }  
-    }
-};
-
 // Backward kernel for weights, e5m2
 template <typename T>
 __global__ void DenseamWeights_e5m2_Kernel(
@@ -149,44 +87,12 @@ __global__ void DenseamWeights_e5m2_Kernel(
             uint8_t a_key = fp32_to_e5m2(inputs[input_width*ix_sample+ix_input]);
             uint8_t b_key = fp32_to_e5m2(grads[ix_sample*units+ix_unit]);
 
-            uint32_t index = (a_key << 8) | b_key;
+            uint32_t index = (a_key << 8) | b_key+256*256;
 
             float mul_result = tex1Dfetch<float>(lut, index);
 
             grad_weights[ix] += mul_result;
         }  
-    }
-};
-
-// Backward kernel for inputs, e4m3
-template <typename T>
-__global__ void DenseamInput_e4m3_Kernel(
-    const T* grads,
-    const T* weights,
-    const int input_width, 
-    const int batch, 
-    const int units, 
-    T* grad_inputs, 
-    cudaTextureObject_t lut) 
-{ 
-    unsigned int ix = blockIdx.x * blockDim.x + threadIdx.x; 
-    if(ix < batch *input_width)
-    {
-        int ix_input = ix % input_width;
-        int ix_sample = ix / input_width ;
-        grad_inputs[ix] = T(0);
-
-        for (int ix_unit = 0; ix_unit < units; ix_unit++)
-        {   
-            uint8_t a_key = fp32_to_e4m3(weights[ix_input*units+ ix_unit]);
-            uint8_t b_key = fp32_to_e4m3(grads[ix_sample*units+ix_unit]);
-
-            uint32_t index = (a_key << 8) | b_key;
-
-            float mul_result = tex1Dfetch<float>(lut, index);
-
-            grad_inputs[ix] += mul_result;
-        }
     }
 };
 
@@ -339,7 +245,7 @@ template <typename T>
 void DenseamFunctor<GpuDevice, T>::operator()(
         const GpuDevice& d, const T* inputs, const T* weights, T* output,
         const int batch, const int units, const int input_width,
-        approx_mul_lut<GpuDevice>& mul_lut, bool fp8, bool is_e4m3)
+        approx_mul_lut<GpuDevice>& mul_lut, bool fp8)
 { 
     unsigned blocksize = 1024;
     unsigned gridsize = (batch*units+blocksize -1)/blocksize;
@@ -365,7 +271,7 @@ template <typename T>
 void DenseamWeightGradFunctor<GpuDevice, T>::operator()
     (const GpuDevice& d, const T* inputs, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<GpuDevice>& mul_lut, bool fp8, bool is_e4m3) 
+            approx_mul_lut<GpuDevice>& mul_lut, bool fp8) 
 {
     unsigned blocksize = 1024;
     unsigned gridsize = (units*input_width+blocksize -1)/blocksize;
@@ -391,7 +297,7 @@ template <typename T>
 void DenseamInputGradFunctor<GpuDevice, T>::operator()
     (const GpuDevice& d, const T* weights, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<GpuDevice>& mul_lut, bool fp8, bool is_e4m3)
+            approx_mul_lut<GpuDevice>& mul_lut, bool fp8)
 {
     unsigned blocksize = 1024;
     unsigned gridsize = (batch*input_width+blocksize -1)/blocksize;

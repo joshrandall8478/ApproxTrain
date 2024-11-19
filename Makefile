@@ -77,14 +77,14 @@ denseam.o: denseam.cc denseam.h
 mul_inc_deps = cuda/AMsimulator.inl 
 
 # cuda stuff
-denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) 
+denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) cuda/fp8_conversion.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $(ADD_ROUNDING_CPPFLAG)  $(FP16TRAINING_CPPFLAG) -c $< -o $@
 matmulam_kernel.cu.o: cuda/matmulam_kernel.cu cuda/error.cuh cuda/gemm.cuh 
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@
 cuda_kernel.cu.o: cuda/cuda_kernel.cu cuda/gpu_kernel_helper.h cuda/error.cuh cuda/gemm.cuh cuda/reverseNswapdim23.cuh 
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) --expt-relaxed-constexpr -c $< -o $@
 
-gemm.cu.o: cuda/gemm.cu $(mul_inc_deps)
+gemm.cu.o: cuda/gemm.cu $(mul_inc_deps) cuda/fp8_conversion.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) $(MULTIPLIER_CPPFLAG) $(ADD_ROUNDING_CPPFLAG)  $(FP16TRAINING_CPPFLAG) -c $< -o $@
 
 reverseNswapdim23.cu.o: cuda/reverseNswapdim23.cu
