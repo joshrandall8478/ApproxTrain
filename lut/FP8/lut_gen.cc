@@ -159,30 +159,61 @@ void save_fp32_lut_to_file(const float* lut, const char* filename) {
     }
 }
 
-// Main Function
+// // Main Function
+// int main() {
+//     // Allocate memory for LUTs
+//     float* e4m3_lut = new float[256 * 256];
+//     float* e5m2_lut = new float[256 * 256];
+
+//     std::memset(e4m3_lut, 0, 256 * 256 * sizeof(float));
+//     std::memset(e5m2_lut, 0, 256 * 256 * sizeof(float));
+
+//     // Generate and save E4M3 FP32 LUT
+//     std::cout << "Generating E4M3 FP32 multiplication LUT..." << std::endl;
+//     generate_fp32_mul_lut(e4m3_lut, true);
+//     save_fp32_lut_to_file(e4m3_lut, "e4m3_fp32_mul_lut.bin");
+
+//     // Generate and save E5M2 FP32 LUT
+//     std::cout << "Generating E5M2 FP32 multiplication LUT..." << std::endl;
+//     generate_fp32_mul_lut(e5m2_lut, false);
+//     save_fp32_lut_to_file(e5m2_lut, "e5m2_fp32_mul_lut.bin");
+
+//     // Clean up
+//     delete[] e4m3_lut;
+//     delete[] e5m2_lut;
+
+//     std::cout << "Lookup tables generated and saved." << std::endl;
+
+//     return 0;
+// }
+
 int main() {
-    // Allocate memory for LUTs
-    float* e4m3_lut = new float[256 * 256];
-    float* e5m2_lut = new float[256 * 256];
-
-    std::memset(e4m3_lut, 0, 256 * 256 * sizeof(float));
-    std::memset(e5m2_lut, 0, 256 * 256 * sizeof(float));
-
-    // Generate and save E4M3 FP32 LUT
+    // Total LUT size: 256*256*2
+    const size_t TOTAL_LUT_SIZE = 256*256*2;
+    const size_t E4M3_SIZE = 256;
+    const size_t E5M2_SIZE = 256;
+    
+    // Allocate memory for the combined LUT
+    float* combined_lut = new float[TOTAL_LUT_SIZE];
+    
+    // Initialize LUT to zero
+    std::memset(combined_lut, 0, TOTAL_LUT_SIZE * sizeof(float));
+    
+    // Generate E4M3 FP32 LUT and store in the first 256 entries
     std::cout << "Generating E4M3 FP32 multiplication LUT..." << std::endl;
-    generate_fp32_mul_lut(e4m3_lut, true);
-    save_fp32_lut_to_file(e4m3_lut, "e4m3_fp32_mul_lut.bin");
-
-    // Generate and save E5M2 FP32 LUT
+    generate_fp32_mul_lut(combined_lut, true);  // is_e4m3 = true
+    
+    // Generate E5M2 FP32 LUT and store in the next 256 entries
     std::cout << "Generating E5M2 FP32 multiplication LUT..." << std::endl;
-    generate_fp32_mul_lut(e5m2_lut, false);
-    save_fp32_lut_to_file(e5m2_lut, "e5m2_fp32_mul_lut.bin");
-
+    generate_fp32_mul_lut(combined_lut + E4M3_SIZE*E4M3_SIZE, false);  // is_e4m3 = false
+    
+    std::cout << "Saving combined LUT to " << "combined_fp8_mul_lut.bin" << "..." << std::endl;
+    save_fp32_lut_to_file(combined_lut, "combined_fp8_mul_lut.bin");
+    
     // Clean up
-    delete[] e4m3_lut;
-    delete[] e5m2_lut;
-
-    std::cout << "Lookup tables generated and saved." << std::endl;
-
+    delete[] combined_lut;
+    
+    std::cout << "Combined lookup table generated and saved successfully." << std::endl;
+    
     return 0;
 }

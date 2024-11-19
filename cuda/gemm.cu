@@ -4,6 +4,7 @@
 #include <math.h>
 #include "tensorflow/core/framework/types.h"
 #include <cuda_fp16.h>
+#include <fp8_conversion.cuh>
 using namespace tensorflow;
 
 #ifdef AMSIMULATOR
@@ -110,3 +111,243 @@ template __global__ void gemm<int32>(size_t m, size_t n, size_t k,
     const int32 *a, size_t lda, const int32 *b, size_t ldb,
    int32 *c, size_t ldc, cudaTextureObject_t mant_lut,
    uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth);
+
+template <typename T>
+__global__ void gemm_e4m3(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, cudaTextureObject_t mant_lut)
+{
+    T value(0);
+
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+
+        if (i*TILE_DIM + threadIdx.x < k && Row < m){
+            As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+        }
+        else{
+            As[threadIdx.y][threadIdx.x] = T(0);
+        }
+
+        if (i*TILE_DIM + threadIdx.y < k && Col < n){
+            Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+        }
+        else{
+            Bs[threadIdx.y][threadIdx.x] = T(0);
+        }
+
+        __syncthreads();
+
+        for (int j = 0; j < TILE_DIM; ++j) {
+            uint8_t a_key = fp32_to_e4m3(As[threadIdx.y][j]);
+            uint8_t b_key = fp32_to_e4m3(Bs[j][threadIdx.x]);
+
+            // Compute the index into the LUT
+            uint32_t index = (a_key << 8) | b_key;  // Concatenate a_key and b_key
+
+            // Fetch the multiplication result from the LUT
+            float mul_result = tex1Dfetch<float>(mant_lut, index);
+
+            // Accumulate the result
+            value += mul_result;
+        }
+
+        __syncthreads();
+    }
+
+    if (Row < m && Col < n) {
+        c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+
+template __global__ void gemm_e4m3<float>(size_t m, size_t n, size_t k,
+    const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc, cudaTextureObject_t mant_lut);
+template __global__ void gemm_e4m3<int32>(size_t m, size_t n, size_t k,
+    const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc, cudaTextureObject_t mant_lut);
+
+template <typename T>
+__global__ void gemm_e4m3(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, cudaTextureObject_t mant_lut)
+{
+    T value(0);
+
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+
+        if (i*TILE_DIM + threadIdx.x < k && Row < m){
+            As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+        }
+        else{
+            As[threadIdx.y][threadIdx.x] = T(0);
+        }
+
+        if (i*TILE_DIM + threadIdx.y < k && Col < n){
+            Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+        }
+        else{
+            Bs[threadIdx.y][threadIdx.x] = T(0);
+        }
+
+        __syncthreads();
+
+        for (int j = 0; j < TILE_DIM; ++j) {
+            uint8_t a_key = fp32_to_e4m3(As[threadIdx.y][j]);
+            uint8_t b_key = fp32_to_e4m3(Bs[j][threadIdx.x]);
+
+            // Compute the index into the LUT
+            uint32_t index = (a_key << 8) | b_key;  // Concatenate a_key and b_key
+
+            // Fetch the multiplication result from the LUT
+            float mul_result = tex1Dfetch<float>(mant_lut, index);
+
+            // Accumulate the result
+            value += mul_result;
+        }
+
+        __syncthreads();
+    }
+
+    if (Row < m && Col < n) {
+        c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+
+template __global__ void gemm_e4m3<float>(size_t m, size_t n, size_t k,
+    const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc, cudaTextureObject_t mant_lut);
+template __global__ void gemm_e4m3<int32>(size_t m, size_t n, size_t k,
+    const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc, cudaTextureObject_t mant_lut);
+
+   template <typename T>
+__global__ void gemm_e4m3(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, cudaTextureObject_t mant_lut)
+{
+    T value(0);
+
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+
+        if (i*TILE_DIM + threadIdx.x < k && Row < m){
+            As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+        }
+        else{
+            As[threadIdx.y][threadIdx.x] = T(0);
+        }
+
+        if (i*TILE_DIM + threadIdx.y < k && Col < n){
+            Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+        }
+        else{
+            Bs[threadIdx.y][threadIdx.x] = T(0);
+        }
+
+        __syncthreads();
+
+        for (int j = 0; j < TILE_DIM; ++j) {
+            uint8_t a_key = fp32_to_e4m3(As[threadIdx.y][j]);
+            uint8_t b_key = fp32_to_e4m3(Bs[j][threadIdx.x]);
+
+            // Compute the index into the LUT
+            uint32_t index = (a_key << 8) | b_key;  // Concatenate a_key and b_key
+
+            // Fetch the multiplication result from the LUT
+            float mul_result = tex1Dfetch<float>(mant_lut, index);
+
+            // Accumulate the result
+            value += mul_result;
+        }
+
+        __syncthreads();
+    }
+
+    if (Row < m && Col < n) {
+        c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+
+template __global__ void gemm_e4m3<float>(size_t m, size_t n, size_t k,
+    const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc, cudaTextureObject_t mant_lut);
+template __global__ void gemm_e4m3<int32>(size_t m, size_t n, size_t k,
+    const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc, cudaTextureObject_t mant_lut);
+
+template <typename T>
+__global__ void gemm_e5m2(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, cudaTextureObject_t mant_lut)
+{
+    T value(0);
+
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+
+        if (i*TILE_DIM + threadIdx.x < k && Row < m){
+            As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+        }
+        else{
+            As[threadIdx.y][threadIdx.x] = T(0);
+        }
+
+        if (i*TILE_DIM + threadIdx.y < k && Col < n){
+            Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+        }
+        else{
+            Bs[threadIdx.y][threadIdx.x] = T(0);
+        }
+
+        __syncthreads();
+
+        for (int j = 0; j < TILE_DIM; ++j) {
+            uint8_t a_key = fp32_to_e5m2(As[threadIdx.y][j]);
+            uint8_t b_key = fp32_to_e5m2(Bs[j][threadIdx.x]);
+
+            // Compute the index into the LUT
+            uint32_t index = ((a_key << 8) | b_key)+ 256*256;  // Concatenate a_key and b_key
+
+            // Fetch the multiplication result from the LUT
+            float mul_result = tex1Dfetch<float>(mant_lut, index);
+
+            // Accumulate the result
+            value += mul_result;
+        }
+
+        __syncthreads();
+    }
+
+    if (Row < m && Col < n) {
+        c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+
+template __global__ void gemm_e5m2<float>(size_t m, size_t n, size_t k,
+    const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc, cudaTextureObject_t mant_lut);
+template __global__ void gemm_e5m2<int32>(size_t m, size_t n, size_t k,
+    const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc, cudaTextureObject_t mant_lut);
