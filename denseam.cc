@@ -60,7 +60,7 @@ template <typename T>
 struct DenseamFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* weights,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut
+            approx_mul_lut<CPUDevice>& mul_lut, bool fp8
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -78,6 +78,7 @@ class DenseamOp: public OpKernel{
     public:
         explicit DenseamOp(OpKernelConstruction* context): OpKernel(context),
         mul_lut_(context) {
+            OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
         }
         void Compute(OpKernelContext* context) override {
             const Tensor& input = context->input(0);
@@ -114,12 +115,14 @@ class DenseamOp: public OpKernel{
                     batch,
                     units,
                     input_width,
-                    mul_lut_
+                    mul_lut_,
+                    fp8_
                     );
         }
 
   private:
   approx_mul_lut<Device> mul_lut_;
+  bool fp8_;
   TF_DISALLOW_COPY_AND_ASSIGN(DenseamOp);
 };
 
@@ -147,7 +150,7 @@ template <typename T>
 struct DenseamWeightGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut
+            approx_mul_lut<CPUDevice>& mul_lut, bool fp8
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -162,7 +165,7 @@ template <typename T>
 struct DenseamInputGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* weight, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut
+            approx_mul_lut<CPUDevice>& mul_lut, bool fp8
             ){
             for(int i = 0; i < batch; i++)
             for(int i = 0; i < batch; i++){
@@ -189,6 +192,7 @@ class DenseamGradOp: public OpKernel {
 public:
   explicit DenseamGradOp(OpKernelConstruction* context) : OpKernel(context),
     mul_lut_(context) {
+        OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
   }
   void Compute(OpKernelContext* context) override {
 
@@ -222,7 +226,8 @@ public:
             batch,
             units,
             input_width,
-            mul_lut_
+            mul_lut_,
+            fp8_
             );
     DenseamInputGradFunctor<Device, T>()(
             context->eigen_device<Device>(),    
@@ -232,11 +237,13 @@ public:
             batch,
             units,
             input_width,
-            mul_lut_
+            mul_lut_,
+            fp8_
             );
   }
   private:
   approx_mul_lut<Device> mul_lut_;
+  bool fp8_;
   TF_DISALLOW_COPY_AND_ASSIGN(DenseamGradOp);
 };
 // Register the CPU kernels.

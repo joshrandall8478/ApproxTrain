@@ -447,7 +447,7 @@ struct ConvamFunctor<CPUDevice, T> {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             const T* im2col, const int padding,
-            approx_mul_lut<CPUDevice>& mul_lut
+            approx_mul_lut<CPUDevice>& mul_lut, bool fp8
           ) {
 
     for (int batch_ = 0; batch_ < batch; ++batch_) {
@@ -499,6 +499,7 @@ public:
   explicit ConvamOp(OpKernelConstruction* context) : OpKernel(context), 
     mul_lut_(context) {
     OP_REQUIRES_OK(context, InitConv2DParameters(context, &params_));
+    OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
   }
   void Compute(OpKernelContext* context) override {
     //  grab input
@@ -545,6 +546,9 @@ public:
             OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), TensorShape({size_shape}), &im2col));
         }
     }
+
+    
+
     // allocate gpu mem for lut
     
     auto output_data = output->flat<T>().data();
@@ -591,11 +595,13 @@ public:
             filter_data,
             im2col_data,
             params_.padding,
-            mul_lut_
+            mul_lut_,
+            fp8_
             );
   }
   private:
   approx_mul_lut<Device> mul_lut_;
+  bool fp8_;
   Conv2DParameters params_;
   TF_DISALLOW_COPY_AND_ASSIGN(ConvamOp);
 };
@@ -634,7 +640,7 @@ struct ConvamFilterGradFunctor<CPUDevice, T>{
           const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<CPUDevice>& mul_lut
+          T* output, approx_mul_lut<CPUDevice>& mul_lut, bool fp8
           ){
 
     for (int out_y = 0; out_y < filter_rows; ++out_y) {
@@ -748,12 +754,14 @@ public:
         errors::InvalidArgument("Dilated rates should be larger than 0."));
 
     OP_REQUIRES_OK(context, context->GetAttr("padding", &padding_));
+    OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
   }
 
   void Compute(OpKernelContext* context) override{
     const Tensor& input = context->input(1);
     const Tensor& filter_sizes = context->input(0);
     const Tensor& out_backprop = context->input(2);
+    
 
     OP_REQUIRES(
         context, TensorShapeUtils::IsVector(filter_sizes.shape()),
@@ -863,10 +871,12 @@ public:
             filter_width,
             filter_height,
             out,
-            mul_lut_
+            mul_lut_,
+            fp8_,
             );
   }
   private:
+  bool fp8_;
   approx_mul_lut<Device> mul_lut_;
   std::vector<int32> dilations_;
   std::vector<int32> strides_;
@@ -907,7 +917,7 @@ struct ConvamInputGradFunctor<CPUDevice, T> {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols,
-          approx_mul_lut<CPUDevice>& mul_lut
+          approx_mul_lut<CPUDevice>& mul_lut, bool fp8
           ){
     for (int ibatch = 0; ibatch < batch; ++ibatch) {
         for (int out_y = 0; out_y < input_rows; ++out_y) {
@@ -1016,12 +1026,15 @@ class ConvamInputGradOp: public OpKernel {
            errors::InvalidArgument("Dilated rates should be larger than 0."));
 
        OP_REQUIRES_OK(context, context->GetAttr("padding", &padding_));
+       OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
      }
 
      void Compute(OpKernelContext* context) override {
         const Tensor& input_sizes = context->input(0);
         const Tensor& filter = context->input(1);
         const Tensor& out_backprop = context->input(2);
+
+        
         OP_REQUIRES(
             context, TensorShapeUtils::IsVector(input_sizes.shape()),
             errors::InvalidArgument(
@@ -1134,10 +1147,12 @@ class ConvamInputGradOp: public OpKernel {
                 out,
                 grad_height,
                 grad_width,
-                mul_lut_
+                mul_lut_,
+                fp8_
                 );
      }
   private:
+  bool fp8_;
   approx_mul_lut<Device> mul_lut_;
   std::vector<int32> dilations_;
   std::vector<int32> strides_;

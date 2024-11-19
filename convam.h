@@ -75,7 +75,7 @@ struct ConvamFunctor {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             T* im2col, const int padding,
-            approx_mul_lut<Device>& mul_lut
+            approx_mul_lut<Device>& mul_lut, bool fp8
           );
 };
 
@@ -88,7 +88,7 @@ struct ConvamInputGradFunctor {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols, 
-          approx_mul_lut<Device>& mul_lut
+          approx_mul_lut<Device>& mul_lut, bool fp8
           );
 };
 
@@ -100,7 +100,7 @@ struct ConvamFilterGradFunctor{
           const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<Device>& mul_lut
+          T* output, approx_mul_lut<Device>& mul_lut, bool fp8
           );
 };
 #ifdef GOOGLE_CUDA
@@ -114,7 +114,7 @@ struct ConvamFunctor<Eigen::GpuDevice, T> {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             T* im2col, const int padding, 
-            approx_mul_lut<Eigen::GpuDevice>& mul_lut
+            approx_mul_lut<Eigen::GpuDevice>& mul_lut, bool fp8
           );
 };
 
@@ -127,7 +127,7 @@ struct ConvamInputGradFunctor<Eigen::GpuDevice, T> {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols,
-          approx_mul_lut<Eigen::GpuDevice>& mul_lut
+          approx_mul_lut<Eigen::GpuDevice>& mul_lut, bool fp8
           );
 };
 template <typename T>
@@ -138,7 +138,7 @@ struct ConvamFilterGradFunctor<Eigen::GpuDevice, T>{
           const int out_rows,const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<Eigen::GpuDevice>& mul_lut
+          T* output, approx_mul_lut<Eigen::GpuDevice>& mul_lut, bool fp8
           );
 };
 
