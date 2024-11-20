@@ -24,9 +24,13 @@ public:
         OP_REQUIRES_OK(context, context->GetAttr("mant_mul_lut", &mant_lut_file_name));
         OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
 
-        OP_REQUIRES(context, !mant_lut_file_name.empty(),
-                    tensorflow::errors::InvalidArgument("No mant LUT file name given"));
+        // OP_REQUIRES(context, !mant_lut_file_name.empty(),
+        //             tensorflow::errors::InvalidArgument("No mant LUT file name given"));
 
+        if (mant_lut_file_name.empty()) {
+            lut_ = false;
+            return;
+        }
         if (!fp8_) {
             unsigned start_delimiter = mant_lut_file_name.find_last_of("_");
             unsigned stop_delimiter = mant_lut_file_name.find_last_of(".");
