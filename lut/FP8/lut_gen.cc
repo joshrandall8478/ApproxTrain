@@ -152,7 +152,7 @@ void save_fp32_lut_to_file(const float* lut, const char* filename) {
         std::cerr << "Error opening file for writing: " << filename << std::endl;
         return;
     }
-    ofs.write(reinterpret_cast<const char*>(lut), 256 * 256 * sizeof(float));
+    ofs.write(reinterpret_cast<const char*>(lut), 256 * 256 * 2* sizeof(float));
     ofs.close();
     if (!ofs.good()) {
         std::cerr << "Error occurred while writing to file: " << filename << std::endl;

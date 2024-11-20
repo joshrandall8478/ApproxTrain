@@ -34,9 +34,9 @@ __device__ float fp16_to_fp32(__half a) {
     return __half2float(a);
 }
 
-// Forward kernel for e4m3
+// Forward kernel for e5m2
 template <typename T>
-__global__ void Denseam_e4m3_Kernel(
+__global__ void Denseam_e5m2_Kernel(
     const T* inputs,
     const T* weights,
     const int batch, 
@@ -53,10 +53,10 @@ __global__ void Denseam_e4m3_Kernel(
         output[ix] = T(0);
         for (int ix_input = 0; ix_input < input_width; ix_input++)
         {
-            uint8_t a_key = fp32_to_e4m3(inputs[ix_sample*input_width+ix_input]);
-            uint8_t b_key = fp32_to_e4m3(weights[ix_input*units+ix_unit]);
+            uint8_t a_key = fp32_to_e5m2(inputs[ix_sample*input_width+ix_input]);
+            uint8_t b_key = fp32_to_e5m2(weights[ix_input*units+ix_unit]);
 
-            uint32_t index = (a_key << 8) | b_key;
+            uint32_t index = (a_key << 8) | b_key+256*256;
 
             float mul_result = tex1Dfetch<float>(lut, index);
 
@@ -252,7 +252,7 @@ void DenseamFunctor<GpuDevice, T>::operator()(
 
     if (fp8)
     {
-            Denseam_e4m3_Kernel<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_());
+            Denseam_e5m2_Kernel<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_());
     }
     else
     {

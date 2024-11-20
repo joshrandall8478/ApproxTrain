@@ -107,17 +107,7 @@ int main(){
 	float elapsedtimekernel;
 	cudaEventCreate(&startkernel);
 	cudaEventRecord(startkernel,0);
-	// __global__ void gemm(size_t m, size_t n, size_t k,
-    // const float *a, size_t lda, const float *b, size_t ldb,
-    // float *c, size_t ldc)
 
-// 	//Dimensions for matrix1. These should be a multiple of BLOCK
-// #define ROWS1 800
-// #define COLS1 1600
-
-// //DImensions for matrix2. These should be a multiple of BLOCK
-// #define ROWS2 1600
-// #define COLS2 800
 
 	gemm<<<numBlocks,threadsPerBlock>>>(ROWS1,COLS2,COLS1,matA_cuda, COLS1,matB_cuda, COLS2,matC_cuda,COLS2);
 	cudaDeviceSynchronize(); checkCudaError();

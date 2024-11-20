@@ -139,7 +139,7 @@ void ConvamKernelLauncher(
         dim3 blockSize(16, 16, 1);
         dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
         if (fp8) {
-            gemm_e4m3<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_());
+            gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_());
         } else {
             gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
         }
@@ -159,7 +159,7 @@ void ConvamKernelLauncher(
          dim3 blockSize(16, 16, 1);
          dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
         if (fp8) {
-            gemm_e4m3<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_());
+            gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_());
         } else {
             gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
         }
@@ -177,7 +177,7 @@ void ConvamKernelLauncher(
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
     if (fp8) {
-        gemm_e4m3<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,filter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_());
+        gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,filter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_());
     } else {
         gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,filter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
     }
@@ -442,7 +442,7 @@ void ConvamFilterGradKernelLauncher(
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
     if (fp8) {
-        gemm_e4m3<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,grad,ldb,out,ldc, mul_lut.get_mant_mul_lut_text_());
+        gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,grad,ldb,out,ldc, mul_lut.get_mant_mul_lut_text_());
     } else {
         gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,grad,ldb,out,ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
     }
@@ -606,7 +606,7 @@ void ConvamInputGradKernelLauncher(
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
     if (fp8) {
-        gemm_e4m3<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,rsfilter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_());
+        gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,rsfilter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_());
     } else {
         gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,rsfilter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
     }
