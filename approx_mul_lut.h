@@ -12,7 +12,7 @@ typedef unsigned long long cudaTextureObject_t;
 class approx_mul_lut_base {
 public:
     explicit approx_mul_lut_base(tensorflow::OpKernelConstruction* context)
-        : fp8_{false}, mant_width_{0}, mant_mask_{0}, a_shift_{0}, b_shift_{0} {
+        : fp8_{false}, mant_width_{0}, mant_mask_{0}, a_shift_{0}, b_shift_{0}, lut_{false} {
         load_lut_binary(context);
     }
 
@@ -106,6 +106,8 @@ public:
     }
 
 protected:
+    bool lut_;
+
     bool fp8_;
     std::vector<uint8_t> mant_mul_lut_uint8_;  // For 8-bit LUTs
     std::vector<float> mant_mul_lut_fp32_;     // Combined FP8 LUT

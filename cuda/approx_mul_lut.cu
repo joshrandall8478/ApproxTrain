@@ -12,6 +12,8 @@ using namespace tensorflow;
 template<>
 approx_mul_lut<Eigen::GpuDevice>::approx_mul_lut(tensorflow::OpKernelConstruction* context)
     : approx_mul_lut_base(context) {
+    if (!lut_)
+        return;
     if (fp8_) {
         // Handle combined FP8 LUT
         gpuErrchk(cudaMalloc(&mant_mul_lut_cuda_fp32_,
@@ -68,6 +70,9 @@ approx_mul_lut<Eigen::GpuDevice>::approx_mul_lut(tensorflow::OpKernelConstructio
 // Destructor Implementation
 template<>
 approx_mul_lut<Eigen::GpuDevice>::~approx_mul_lut() {
+    // check if lut is enabled
+    if (!lut_)
+        return;
     cudaDestroyTextureObject(mant_mul_lut_text_);
     if (fp8_) {
         cudaFree(mant_mul_lut_cuda_fp32_);
