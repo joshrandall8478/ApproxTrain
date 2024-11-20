@@ -10,7 +10,7 @@
 #define CARRY_MASK 0x80
 #define CLEAR_CARRY_MASK 0x7f
 
-__device__ __inline__ float AMsimulator(float Af, float Bf, cudaTextureObject_t lut, uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth)
+__device__ __forceinline__ float AMsimulator(float Af, float Bf, cudaTextureObject_t lut, uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth)
 {
     uint32_t  at = *(uint32_t *)&Af;
 	uint32_t  bt = *(uint32_t *)&Bf;
@@ -30,7 +30,5 @@ __device__ __inline__ float AMsimulator(float Af, float Bf, cudaTextureObject_t 
     }
     Oaccexp = Oaccexp - 127 + is_normalized;
     uint32_t Oi = Oaccsgn + (Oaccexp << 23) + Mbm_mantmult;
-	return *(float*)&Oi;
-
-
+    return *(float*)&Oi;
 }

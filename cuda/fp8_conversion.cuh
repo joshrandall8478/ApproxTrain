@@ -119,5 +119,94 @@ __device__ __forceinline__ uint8_t fp32_to_e5m2(float f) {
     fp8_bits = (sign << 7) | (exp_bits << E5M2_MAN_BITS) | man_bits;
     return fp8_bits;
 }
+////////////////////////////////////////////////////////////////////////////////
+// FP8 E4M3 to FP32 Conversion
+////////////////////////////////////////////////////////////////////////////////
+__device__ __forceinline__ float e4m3_to_fp32(uint8_t fp8_val) {
+    // get sign of e4m3
+    uint8_t sign = (fp8_val >> 7) & 0x1;
+    // get exp of e4m3
+    uint8_t exponent = (fp8_val >> 3) & 0xF;
+    // get mantissa
+    uint8_t mantissa = fp8_val & 0x7;
+
+    // prepare fp32
+    uint32_t sign_bit = sign << 31;
+    int32_t exponent_value;
+    uint32_t mantissa_value;
+
+    if (exponent == 0) {
+        if (mantissa == 0) {
+            // Zeros
+            exponent_value = 0;
+            mantissa_value = 0;
+        } else {
+            // Max and min subnormal number
+            // the effective exponent for e4m3 is 1 - 7 = -6
+            exponent_value = 127 - 6; // Adjust for bias (7) and exponent = 1
+            mantissa_value = mantissa << (23 - 3); // Align mantissa to 23 bits
+        }
+    } else if (exponent == 0xF) {
+        if (mantissa == 0x7) {
+            // NaN (exponent and mantissa all ones)
+            exponent_value = 0xFF;
+            mantissa_value = 1 << 22; // Set the quiet NaN bit
+        } else {
+            // Maximum normal number
+            exponent_value = (exponent - 7 + 127); // Adjust exponent bias
+            mantissa_value = mantissa << (23 - 3);
+        }
+    } else {
+        // Normalized number
+        exponent_value = exponent - 7 + 127; // Adjust exponent bias
+        mantissa_value = mantissa << (23 - 3); // Align mantissa to 23 bits
+    }
+
+    uint32_t result_bits = sign_bit | (exponent_value << 23) | mantissa_value;
+    Float32Bits fb;
+    fb.u = result_bits;
+    return fb.f;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// FP8 E5M2 to FP32 Conversion
+////////////////////////////////////////////////////////////////////////////////
+
+__device__ __forceinline__ float e5m2_to_fp32(uint8_t fp8_val) {
+    uint8_t sign = (fp8_val >> 7) & 0x1;
+    uint8_t exponent = (fp8_val >> 2) & 0x1F;
+    uint8_t mantissa = fp8_val & 0x3;
+
+    uint32_t sign_bit = sign << 31;
+    int32_t exponent_value;
+    uint32_t mantissa_value;
+
+    if (exponent == 0) {
+        if (mantissa == 0) {
+            // Zero
+            exponent_value = 0;
+            mantissa_value = 0;
+        } else {
+            // Subnormal number
+            // the effective exponent for e5m2 is 1 - 15 = -14
+            exponent_value = 127 - 14; // Adjust for bias (15) and exponent = 1
+            mantissa_value = mantissa << (23 - 2); // Align mantissa to 23 bits
+        }
+    } else if (exponent == 0x1F) {
+        // NaN or Infinity
+        exponent_value = 0xFF;
+        mantissa_value = mantissa ? (1 << 22) : 0; // NaN if mantissa != 0
+    } else {
+        // Normalized number
+        exponent_value = exponent - 15 + 127; // Adjust exponent bias
+        mantissa_value = mantissa << (23 - 2); // Align mantissa to 23 bits
+    }
+
+    uint32_t result_bits = sign_bit | (exponent_value << 23) | mantissa_value;
+    Float32Bits fb;
+    fb.u = result_bits;
+    return fb.f;
+}
+
 
 #endif  // FP8_CONVERSION_CUH
