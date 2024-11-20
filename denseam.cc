@@ -1,6 +1,7 @@
 
 #include "denseam.h"
 #include "approx_mul_lut.h"
+#include "floatmode.h"
 // #include "tensorflow/core/kernels/conv_ops.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor_shape.h"
@@ -39,7 +40,7 @@ REGISTER_OP("Denseam")
   .Output("output: T")
   .Attr("T: {float, int32}")
   .Attr("mant_mul_lut: string")
-  .Attr("fp8: bool = false")
+  .Attr("FPMode: string")
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
 
    shape_inference::ShapeHandle input_shape;
@@ -60,7 +61,7 @@ template <typename T>
 struct DenseamFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* weights,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, bool fp8
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -78,7 +79,22 @@ class DenseamOp: public OpKernel{
     public:
         explicit DenseamOp(OpKernelConstruction* context): OpKernel(context),
         mul_lut_(context) {
-            OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
+             // grab FPMode and match to FloatMode
+            OP_REQUIRES_OK(context, context->GetAttr("FPMode", &FPMode_));
+            if(FPMode_ == "FP32"){
+                mode_ = FloatMode::FP32;
+            } else if(FPMode_ == "FP16"){
+                mode_ = FloatMode::FP16;
+            } else if(FPMode_ == "BF16"){
+                mode_ = FloatMode::BF16;
+            } else if(FPMode_ == "FP8E5M2"){
+                mode_ = FloatMode::FP8E5M2;
+            } else if(FPMode_ == "FP8HYB"){
+                mode_ = FloatMode::FP8HYB;
+            } else {
+                // raise error invalide mode
+                OP_REQUIRES(context, false, errors::InvalidArgument("Invalid FPMode"));
+            }
         }
         void Compute(OpKernelContext* context) override {
             const Tensor& input = context->input(0);
@@ -116,13 +132,14 @@ class DenseamOp: public OpKernel{
                     units,
                     input_width,
                     mul_lut_,
-                    fp8_
+                    mode_
                     );
         }
 
   private:
   approx_mul_lut<Device> mul_lut_;
-  bool fp8_;
+  FloatMode mode_;
+  std::string FPMode_;
   TF_DISALLOW_COPY_AND_ASSIGN(DenseamOp);
 };
 
@@ -150,7 +167,7 @@ template <typename T>
 struct DenseamWeightGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, bool fp8
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -165,7 +182,7 @@ template <typename T>
 struct DenseamInputGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* weight, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, bool fp8
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
             ){
             for(int i = 0; i < batch; i++)
             for(int i = 0; i < batch; i++){
@@ -186,13 +203,28 @@ REGISTER_OP("DenseamGrad")
   .Output("grad_weights: T")
   .Attr("T: {float, int32}")
   .Attr("mant_mul_lut: string")
-  .Attr("fp8: bool = false");
+  .Attr("FPMode: string");
 template<typename Device, typename T>
 class DenseamGradOp: public OpKernel {
 public:
   explicit DenseamGradOp(OpKernelConstruction* context) : OpKernel(context),
     mul_lut_(context) {
-        OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
+    // grab FPMode and match to FloatMode
+    OP_REQUIRES_OK(context, context->GetAttr("FPMode", &FPMode_));
+    if(FPMode_ == "FP32"){
+        mode_ = FloatMode::FP32;
+    } else if(FPMode_ == "FP16"){
+        mode_ = FloatMode::FP16;
+    } else if(FPMode_ == "BF16"){
+        mode_ = FloatMode::BF16;
+    } else if(FPMode_ == "FP8E5M2"){
+        mode_ = FloatMode::FP8E5M2;
+    } else if(FPMode_ == "FP8HYB"){
+        mode_ = FloatMode::FP8HYB;
+    } else {
+        // raise error invalide mode
+        OP_REQUIRES(context, false, errors::InvalidArgument("Invalid FPMode"));
+    }
   }
   void Compute(OpKernelContext* context) override {
 
@@ -227,7 +259,7 @@ public:
             units,
             input_width,
             mul_lut_,
-            fp8_
+            mode_
             );
     DenseamInputGradFunctor<Device, T>()(
             context->eigen_device<Device>(),    
@@ -238,12 +270,13 @@ public:
             units,
             input_width,
             mul_lut_,
-            fp8_
+            mode_
             );
   }
   private:
   approx_mul_lut<Device> mul_lut_;
-  bool fp8_;
+    FloatMode mode_;
+    std::string FPMode_;
   TF_DISALLOW_COPY_AND_ASSIGN(DenseamGradOp);
 };
 // Register the CPU kernels.

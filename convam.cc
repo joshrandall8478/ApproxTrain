@@ -19,6 +19,7 @@
 #include <fstream>
 #include <chrono>
 #include <sys/time.h>
+#include "floatmode.h"
 
 using namespace std;
 using namespace tensorflow;
@@ -432,7 +433,7 @@ REGISTER_OP("Convam")
     .Attr("strides: list(int)")
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("mant_mul_lut: string")
-    .Attr("fp8: bool = false")
+    .Attr("FPMode: string")
     .Attr(GetPaddingAttrString())
     .Attr(GetConvnetDataFormatAttrString())
     .SetShapeFn(::tensorflow::shape_inference::Conv2DShape);
@@ -447,7 +448,7 @@ struct ConvamFunctor<CPUDevice, T> {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             const T* im2col, const int padding,
-            approx_mul_lut<CPUDevice>& mul_lut, bool fp8
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
           ) {
 
     for (int batch_ = 0; batch_ < batch; ++batch_) {
@@ -499,12 +500,29 @@ public:
   explicit ConvamOp(OpKernelConstruction* context) : OpKernel(context), 
     mul_lut_(context) {
     OP_REQUIRES_OK(context, InitConv2DParameters(context, &params_));
-    OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
+    // grab FPMode
+    OP_REQUIRES_OK(context, context->GetAttr("FPMode", &FPMode_));
+    // match FPMode to FloatMode
+    if(FPMode_ == "FP32"){
+        mode_ = FloatMode::FP32;
+    } else if(FPMode_ == "FP16"){
+        mode_ = FloatMode::FP16;
+    } else if(FPMode_ == "BF16"){
+        mode_ = FloatMode::BF16;
+    } else if(FPMode_ == "FP8E5M2"){
+        mode_ = FloatMode::FP8E5M2;
+    } else if(FPMode_ == "FP8HYB"){
+        mode_ = FloatMode::FP8HYB;
+    } else {
+        // raise error invalide mode
+        OP_REQUIRES(context, false, errors::InvalidArgument("Invalid FPMode"));
+    }
   }
   void Compute(OpKernelContext* context) override {
     //  grab input
     const Tensor& input = context->input(0);
     const Tensor& filter = context->input(1);
+    
     // calculate parameters
     Conv2DDimensions dimensions;
     OP_REQUIRES_OK(context,
@@ -596,12 +614,13 @@ public:
             im2col_data,
             params_.padding,
             mul_lut_,
-            fp8_
+            mode_
             );
   }
   private:
   approx_mul_lut<Device> mul_lut_;
-  bool fp8_;
+  FloatMode mode_;
+  std::string FPMode_;
   Conv2DParameters params_;
   TF_DISALLOW_COPY_AND_ASSIGN(ConvamOp);
 };
@@ -640,7 +659,7 @@ struct ConvamFilterGradFunctor<CPUDevice, T>{
           const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<CPUDevice>& mul_lut, bool fp8
+          T* output, approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
           ){
 
     for (int out_y = 0; out_y < filter_rows; ++out_y) {
@@ -703,7 +722,7 @@ REGISTER_OP("ConvamFilterGrad")
   .Attr("strides: list(int)")
   .Attr("dilations: list(int) = [1, 1, 1, 1]")
   .Attr("mant_mul_lut: string")
-  .Attr("fp8: bool = false")
+  .Attr("FPMode: string")
   .Attr(GetPaddingAttrString())
   .Attr(GetConvnetDataFormatAttrString())
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
@@ -754,7 +773,22 @@ public:
         errors::InvalidArgument("Dilated rates should be larger than 0."));
 
     OP_REQUIRES_OK(context, context->GetAttr("padding", &padding_));
-    OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
+    // grab FPMode and match to FloatMode
+    OP_REQUIRES_OK(context, context->GetAttr("FPMode", &FPMode_));
+    if(FPMode_ == "FP32"){
+        mode_ = FloatMode::FP32;
+    } else if(FPMode_ == "FP16"){
+        mode_ = FloatMode::FP16;
+    } else if(FPMode_ == "BF16"){
+        mode_ = FloatMode::BF16;
+    } else if(FPMode_ == "FP8E5M2"){
+        mode_ = FloatMode::FP8E5M2;
+    } else if(FPMode_ == "FP8HYB"){
+        mode_ = FloatMode::FP8HYB;
+    } else {
+        // raise error invalide mode
+        OP_REQUIRES(context, false, errors::InvalidArgument("Invalid FPMode"));
+    }
   }
 
   void Compute(OpKernelContext* context) override{
@@ -872,11 +906,12 @@ public:
             filter_height,
             out,
             mul_lut_,
-            fp8_
+            mode_
             );
   }
   private:
-  bool fp8_;
+  FloatMode mode_;
+  std::string FPMode_;
   approx_mul_lut<Device> mul_lut_;
   std::vector<int32> dilations_;
   std::vector<int32> strides_;
@@ -917,7 +952,7 @@ struct ConvamInputGradFunctor<CPUDevice, T> {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols,
-          approx_mul_lut<CPUDevice>& mul_lut, bool fp8
+          approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
           ){
     for (int ibatch = 0; ibatch < batch; ++ibatch) {
         for (int out_y = 0; out_y < input_rows; ++out_y) {
@@ -978,7 +1013,7 @@ REGISTER_OP("ConvamInputGrad")
     .Attr(GetConvnetDataFormatAttrString())
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("mant_mul_lut: string")
-    .Attr("fp8: bool = false")
+    .Attr("FPMode: string")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
       ::tensorflow::shape_inference::ShapeHandle s;
       TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
@@ -1026,14 +1061,29 @@ class ConvamInputGradOp: public OpKernel {
            errors::InvalidArgument("Dilated rates should be larger than 0."));
 
        OP_REQUIRES_OK(context, context->GetAttr("padding", &padding_));
-       OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
+       // grab FPMode and match to FloatMode
+        OP_REQUIRES_OK(context, context->GetAttr("FPMode", &FPMode_));
+        if(FPMode_ == "FP32"){
+            mode_ = FloatMode::FP32;
+        } else if(FPMode_ == "FP16"){
+            mode_ = FloatMode::FP16;
+        } else if(FPMode_ == "BF16"){
+            mode_ = FloatMode::BF16;
+        } else if(FPMode_ == "FP8E5M2"){
+            mode_ = FloatMode::FP8E5M2;
+        } else if(FPMode_ == "FP8HYB"){
+            mode_ = FloatMode::FP8HYB;
+        } else {
+            // raise error invalide mode
+            OP_REQUIRES(context, false, errors::InvalidArgument("Invalid FPMode"));
+        }
      }
 
      void Compute(OpKernelContext* context) override {
         const Tensor& input_sizes = context->input(0);
         const Tensor& filter = context->input(1);
         const Tensor& out_backprop = context->input(2);
-
+        
         
         OP_REQUIRES(
             context, TensorShapeUtils::IsVector(input_sizes.shape()),
@@ -1148,11 +1198,12 @@ class ConvamInputGradOp: public OpKernel {
                 grad_height,
                 grad_width,
                 mul_lut_,
-                fp8_
+                mode_
                 );
      }
   private:
-  bool fp8_;
+  FloatMode mode_;
+  std::string FPMode_;
   approx_mul_lut<Device> mul_lut_;
   std::vector<int32> dilations_;
   std::vector<int32> strides_;

@@ -22,8 +22,11 @@ public:
     void load_lut_binary(tensorflow::OpKernelConstruction* context) {
         std::string mant_lut_file_name;
         OP_REQUIRES_OK(context, context->GetAttr("mant_mul_lut", &mant_lut_file_name));
-        OP_REQUIRES_OK(context, context->GetAttr("fp8", &fp8_));
-
+        OP_REQUIRES_OK(context, context->GetAttr("FPMode", &fpmode_));
+        // if fpmode is FP8E5M2 or FP8HYB, then fp8_ is true
+        if (fpmode_ == "FP8E5M2" || fpmode_ == "FP8HYB") {
+            fp8_ = true;
+        }
         // OP_REQUIRES(context, !mant_lut_file_name.empty(),
         //             tensorflow::errors::InvalidArgument("No mant LUT file name given"));
 
@@ -109,10 +112,14 @@ public:
         return fp8_;
     }
 
+    bool is_lut() {
+        return lut_;
+    }
 protected:
-    bool lut_;
+    
 
     bool fp8_;
+    std::string fpmode_;
     std::vector<uint8_t> mant_mul_lut_uint8_;  // For 8-bit LUTs
     std::vector<float> mant_mul_lut_fp32_;     // Combined FP8 LUT
 
@@ -125,6 +132,7 @@ protected:
     uint32_t mant_mask_;
     uint8_t a_shift_;
     uint8_t b_shift_;
+    bool lut_;
 };
 
 template <typename Device>

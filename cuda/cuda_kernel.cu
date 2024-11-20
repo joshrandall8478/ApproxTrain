@@ -19,6 +19,8 @@
 #include <iostream>
 #include <algorithm>
 #include <iterator>
+#include "gemm_launcher.cuh"
+#include "floatmode.h"
 
 using namespace tensorflow;
 //using namespace std;
@@ -26,6 +28,7 @@ using namespace tensorflow;
 #define BLOCK_SIZE 1024
 using GPUDevice = Eigen::GpuDevice;
 using CPUDevice = Eigen::ThreadPoolDevice;
+
 
 
 //=============================================================================
@@ -92,10 +95,7 @@ void im2colLauncher(
     gpuErrchk( cudaDeviceSynchronize() );
 
 }
-template <typename T>
-__global__ void test(cudaTextureObject_t lut, T *arr, int pos){
-    arr[pos] = (T)tex1Dfetch<uint32_t>(lut, pos); 
-}
+
 template <typename T>
 void ConvamKernelLauncher(
     const GPUDevice &d,
@@ -119,13 +119,9 @@ void ConvamKernelLauncher(
     const int padding,
     T* output,
     approx_mul_lut<GPUDevice>& mul_lut,
-    bool fp8
+    FloatMode mode
   ){
 
-    const uint32_t mant_mask = mul_lut.get_mant_mask_();
-    const uint8_t a_shift = mul_lut.get_a_shift_();
-    const uint8_t b_shift = mul_lut.get_b_shift_();
-    const uint8_t mant_bitwidth = mul_lut.get_mant_width_();
     if (filter_row == 1 && filter_col == 1 && stride_row == 1 &&
         stride_col == 1) {
         // The kernel is 1x1.
@@ -138,13 +134,7 @@ void ConvamKernelLauncher(
         //const int size = m*n;
         dim3 blockSize(16, 16, 1);
         dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-        if (fp8) {
-            gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_());
-        } else {
-            gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
-        }
-        gpuErrchk( cudaPeekAtLastError() );
-        gpuErrchk( cudaDeviceSynchronize() );
+        GEMM_LAUNCHER<T>(d, m, n, k, inputs, lda, filter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true);
         return;
     } else if (filter_row == in_row && filter_col== in_col &&
                padding == 1) {
@@ -158,11 +148,7 @@ void ConvamKernelLauncher(
          //const int size = m*n;
          dim3 blockSize(16, 16, 1);
          dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-        if (fp8) {
-            gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_());
-        } else {
-            gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,inputs,lda,filter,ldb,output, ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
-        }
+         GEMM_LAUNCHER<T>(d, m, n, k, inputs, lda, filter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true);
          gpuErrchk( cudaPeekAtLastError() );
          gpuErrchk( cudaDeviceSynchronize() );
          return;
@@ -176,13 +162,7 @@ void ConvamKernelLauncher(
     const size_t ldc = out_depth;
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    if (fp8) {
-        gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,filter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_());
-    } else {
-        gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,filter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
-    }
-    gpuErrchk( cudaPeekAtLastError() );
-    gpuErrchk( cudaDeviceSynchronize() );
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, filter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true);
 
 }
 
@@ -198,7 +178,7 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
         const int filter_left_offset, const int filter_top_offset,
         const int filter_rows, const int filter_cols, const int in_depth,
         const int input_cols, const int input_rows, const T* filter,
-        T* im2col, const int padding, approx_mul_lut<GPUDevice>& mul_lut, bool fp8
+        T* im2col, const int padding, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode
         ) {
     // this is a very primitive tiling function. I mean VERY.
     //TODO Simplify the cases
@@ -229,7 +209,7 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data,
                     mul_lut,
-                    fp8
+                    mode
                     );
         } else {
             loop1Da(i, batch, max_batch) {
@@ -254,7 +234,7 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data + i * oneoutputsize,
                     mul_lut,
-                    fp8
+                    mode
                     );
             }
         }
@@ -279,7 +259,7 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data,
                     mul_lut,
-                    fp8
+                    mode
                     );
     } else {
         size_t const block_size = 16;
@@ -305,7 +285,7 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data,
                     mul_lut,
-                    fp8
+                    mode
                     );
         } else {
             loop1Da(i, batch, max_batch){
@@ -330,7 +310,7 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data + i * oneoutputsize,
                     mul_lut,
-                    fp8
+                    mode
                     );
             }
         }
@@ -424,12 +404,8 @@ void ConvamFilterGradKernelLauncher(
     const int filter_height,
     T* out, 
     approx_mul_lut<GPUDevice>& mul_lut,
-    bool fp8
+    FloatMode mode
 ){
-    const uint32_t mant_mask = mul_lut.get_mant_mask_();
-    const uint8_t a_shift = mul_lut.get_a_shift_();
-    const uint8_t b_shift = mul_lut.get_b_shift_();
-    const uint8_t mant_bitwidth = mul_lut.get_mant_width_();
 
     im2colLauncher_filtergrad<T>(d,input,batch,input_height,input_width,grad_height,grad_width,grad_channel,in_depth,filter_height,filter_width,stride_row,stride_col,\
     filter_left_offset,filter_top_offset,1,1,im2col);
@@ -441,13 +417,7 @@ void ConvamFilterGradKernelLauncher(
     const size_t ldc = n;
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    if (fp8) {
-        gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,grad,ldb,out,ldc, mul_lut.get_mant_mul_lut_text_());
-    } else {
-        gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,grad,ldb,out,ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
-    }
-    gpuErrchk( cudaPeekAtLastError() );
-    gpuErrchk( cudaDeviceSynchronize() );
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad, ldb, out, ldc, blockSize, gridSize, mul_lut, mode, true);
 };
 
 template <typename T>
@@ -458,7 +428,7 @@ void ConvamFilterGradFunctor<Eigen::GpuDevice, T>::operator()(
         const int out_rows,const int out_depth, const int filter_left_offset,
         const int filter_top_offset, const int stride_rows,
         const int stride_cols, const int filter_cols, const int filter_rows,
-        T* output, approx_mul_lut<GPUDevice>& mul_lut, bool fp8
+        T* output, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode
         ) {
     ConvamFilterGradKernelLauncher<T>(
             d,
@@ -480,7 +450,7 @@ void ConvamFilterGradFunctor<Eigen::GpuDevice, T>::operator()(
             filter_rows,
             output,
             mul_lut,
-            fp8
+            mode
             );
 }
 template <typename T>
@@ -580,14 +550,11 @@ void ConvamInputGradKernelLauncher(
     const int input_channel,
     T* output,
     approx_mul_lut<GPUDevice>& mul_lut,
-    bool fp8
+    FloatMode mode
 
 ){
 
-    const uint32_t mant_mask = mul_lut.get_mant_mask_();
-    const uint8_t a_shift = mul_lut.get_a_shift_();
-    const uint8_t b_shift = mul_lut.get_b_shift_();
-    const uint8_t mant_bitwidth = mul_lut.get_mant_width_();
+
     im2colLauncher_inputgrad<T>(
         d,grad, input_batch, hole_grad_height, hole_grad_width, input_height, input_width,input_channel,output_channel,filter_height,
         filter_width,stride_rows,stride_cols,back_pad_left,back_pad_top,1,1,im2col);
@@ -605,14 +572,7 @@ void ConvamInputGradKernelLauncher(
     gpuErrchk( cudaDeviceSynchronize() );
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    if (fp8) {
-        gemm_e5m2<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,rsfilter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_());
-    } else {
-        gemm<T><<<gridSize,blockSize,0,d.stream()>>>(m,n,k,im2col,lda,rsfilter,ldb,output,ldc, mul_lut.get_mant_mul_lut_text_(), mant_mask, a_shift, b_shift, mant_bitwidth);
-    }
-    gpuErrchk( cudaPeekAtLastError() );
-    gpuErrchk( cudaDeviceSynchronize() );
-
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, rsfilter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true);
 };
 
 template <typename T>
@@ -624,7 +584,7 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
         const int stride_rows, const int stride_cols, const int batch,
         const int input_rows, const int input_cols, const int in_depth,
         T* output, const int out_rows, const int out_cols, 
-        approx_mul_lut<GPUDevice>& mul_lut, bool fp8
+        approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode
         ){
     // a very primitive tiling, I mean VERY
     //auto const oneinputsize = input_rows*input_cols*in_depth;
@@ -655,7 +615,7 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                 in_depth,
                 output,
                 mul_lut,
-                fp8
+                mode
                 );
     } else {
         loop1Da(i, batch, max_batch){
@@ -681,7 +641,7 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                      in_depth,
                      output + i*oneoutputsize,
                      mul_lut,
-                     fp8
+                     mode
                 );
         }
     }

@@ -3,6 +3,7 @@
 
 #include <unsupported/Eigen/CXX11/Tensor>
 #include "approx_mul_lut.h"
+#include "floatmode.h"
 //#include <tensorflow/core/framework/op_kernel.h>
 //#include <fstream>
 //typedef unsigned long long cudaTextureObject_t;
@@ -75,7 +76,7 @@ struct ConvamFunctor {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             T* im2col, const int padding,
-            approx_mul_lut<Device>& mul_lut, bool fp8
+            approx_mul_lut<Device>& mul_lut, FloatMode mode
           );
 };
 
@@ -88,7 +89,7 @@ struct ConvamInputGradFunctor {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols, 
-          approx_mul_lut<Device>& mul_lut, bool fp8
+          approx_mul_lut<Device>& mul_lut, FloatMode mode
           );
 };
 
@@ -100,7 +101,7 @@ struct ConvamFilterGradFunctor{
           const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<Device>& mul_lut, bool fp8
+          T* output, approx_mul_lut<Device>& mul_lut, FloatMode mode
           );
 };
 #ifdef GOOGLE_CUDA
@@ -114,7 +115,7 @@ struct ConvamFunctor<Eigen::GpuDevice, T> {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             T* im2col, const int padding, 
-            approx_mul_lut<Eigen::GpuDevice>& mul_lut, bool fp8
+            approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode
           );
 };
 
@@ -127,7 +128,7 @@ struct ConvamInputGradFunctor<Eigen::GpuDevice, T> {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols,
-          approx_mul_lut<Eigen::GpuDevice>& mul_lut, bool fp8
+          approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode
           );
 };
 template <typename T>
@@ -138,7 +139,7 @@ struct ConvamFilterGradFunctor<Eigen::GpuDevice, T>{
           const int out_rows,const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<Eigen::GpuDevice>& mul_lut, bool fp8
+          T* output, approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode
           );
 };
 

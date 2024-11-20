@@ -83,6 +83,11 @@ template __global__ void gemm<float>(size_t m, size_t n, size_t k,
    const float *a, size_t lda, const float *b, size_t ldb,
    float *c, size_t ldc
    );
+// int32 initialisation of gemm
+template __global__ void gemm<int32>(size_t m, size_t n, size_t k,
+   const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc
+   );
 
 /* gemm non-lut bfloat16*/
 // clip the values to bf16 then convert it back to fp32 (truncation)
@@ -139,6 +144,12 @@ template __global__ void gemm_bf16<float>(size_t m, size_t n, size_t k,
    const float *a, size_t lda, const float *b, size_t ldb,
    float *c, size_t ldc
    );
+// int32 initialisation of gemm
+template __global__ void gemm_bf16<int32>(size_t m, size_t n, size_t k,
+   const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc
+   );
+
 
 /* gemm non-lut fp16*/
 // clip the values to fp16 then convert it back to fp32 (truncation)
@@ -194,6 +205,11 @@ __global__ void gemm_fp16(size_t m, size_t n, size_t k,
 template __global__ void gemm_fp16<float>(size_t m, size_t n, size_t k,
    const float *a, size_t lda, const float *b, size_t ldb,
    float *c, size_t ldc
+   );
+// int32 initialisation of gemm
+template __global__ void gemm_fp16<int32>(size_t m, size_t n, size_t k,
+   const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc
    );
 
 /* gemm non-lut fp8*/
@@ -251,6 +267,11 @@ template __global__ void gemm_e4m3<float>(size_t m, size_t n, size_t k,
    const float *a, size_t lda, const float *b, size_t ldb,
    float *c, size_t ldc
    );
+// int32 initialisation of gemm
+template __global__ void gemm_e4m3<int32>(size_t m, size_t n, size_t k,
+   const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc
+   );
 
 // fp32 to e5m2 then convert back to fp32
 __device__ __forceinline__ float clip_fp8_e5m2(float a) {
@@ -304,6 +325,11 @@ __global__ void gemm_e5m2(size_t m, size_t n, size_t k,
 template __global__ void gemm_e5m2<float>(size_t m, size_t n, size_t k,
    const float *a, size_t lda, const float *b, size_t ldb,
    float *c, size_t ldc
+   );
+// int32 initialisation of gemm
+template __global__ void gemm_e5m2<int32>(size_t m, size_t n, size_t k,
+   const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc
    );
 
 /* lut implementation */
@@ -361,6 +387,12 @@ template __global__ void gemm<float>(size_t m, size_t n, size_t k,
    float *c, size_t ldc, cudaTextureObject_t mant_lut,
    uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth
    );
+// int32 initialisation of gemm
+template __global__ void gemm<int32>(size_t m, size_t n, size_t k,
+   const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc, cudaTextureObject_t mant_lut,
+   uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth
+   );
 
 // gemm lut 5-bit exponents typed e.g. FP16
 // this is a dummy implementation
@@ -413,6 +445,12 @@ __global__ void gemm_5exp(size_t m, size_t n, size_t k,
 template __global__ void gemm_5exp<float>(size_t m, size_t n, size_t k,
    const float *a, size_t lda, const float *b, size_t ldb,
    float *c, size_t ldc, cudaTextureObject_t mant_lut,
+   uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth
+   );
+// int32 initialisation of gemm_5exp
+template __global__ void gemm_5exp<int32>(size_t m, size_t n, size_t k,
+   const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc, cudaTextureObject_t mant_lut,
    uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth
    );
 
@@ -474,6 +512,9 @@ __global__ void gemm_e5m2(size_t m, size_t n, size_t k,
 template __global__ void gemm_e5m2<float>(size_t m, size_t n, size_t k,
     const float *a, size_t lda, const float *b, size_t ldb,
    float *c, size_t ldc, cudaTextureObject_t mant_lut);
+template __global__ void gemm_e5m2<int32>(size_t m, size_t n, size_t k,
+    const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc, cudaTextureObject_t mant_lut);
 
 // convert two fp32 to two e4m3 then forms a lut key and fetch fp32 results directly from lut
 template <typename T>
@@ -532,5 +573,8 @@ __global__ void gemm_e4m3(size_t m, size_t n, size_t k,
 template __global__ void gemm_e4m3<float>(size_t m, size_t n, size_t k,
     const float *a, size_t lda, const float *b, size_t ldb,
    float *c, size_t ldc, cudaTextureObject_t mant_lut);
-
+template __global__ void gemm_e4m3<int32>(size_t m, size_t n, size_t k,
+    const int32 *a, size_t lda, const int32 *b, size_t ldb,
+   int32 *c, size_t ldc, cudaTextureObject_t mant_lut);
+   
 /* end of new implementation*/
