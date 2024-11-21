@@ -20,7 +20,7 @@
 #include <algorithm>
 #include <iterator>
 #include "gemm_launcher.cuh"
-#include "floatmode.h"
+// #include "floatmode.h"
 
 using namespace tensorflow;
 //using namespace std;

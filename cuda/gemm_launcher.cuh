@@ -5,7 +5,7 @@
 #include "gemm.cuh"
 #include "approx_mul_lut.h"
 #include "floatmode.h"
-
+#include <iostream>
 #include "tensorflow/core/framework/types.h"
 using namespace tensorflow;
 
@@ -48,6 +48,13 @@ void GEMM_LAUNCHER(
     FloatMode mode,
     bool forward_pass
 ){
+
+    // //print floatmode
+    // std::cout << "FloatMode: " << FloatModeToString(mode) << std::endl;
+
+    // // print if lut is used
+    // std::cout << "LUT: " << mul_lut.is_lut() << std::endl;
+
     // check if mul_lut
     if (mul_lut.is_lut()){
         // using case for different float modes

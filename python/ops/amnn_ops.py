@@ -93,7 +93,7 @@ def amconvolution_internal(
     call_from_convolution=True,
     num_spatial_dims=None,
     mant_mul_lut='',
-    fp8=False
+    FPMode='FP32'
     ):
   """Internal function which performs rank agnostic convolution.
 
@@ -193,7 +193,7 @@ def amconvolution_internal(
           dilations=dilations,
           name=name,
           mant_mul_lut=mant_mul_lut,
-          fp8=fp8
+          FPMode=FPMode
           )
     else:
         raise ValueError("Dilation is not supported in current implementation")
@@ -209,7 +209,7 @@ def amconvolution_v2(  # pylint: disable=missing-docstring
     dilations=None,
     name=None,
     mant_mul_lut='',
-    fp8=False):
+    FPMode='FP32'):
   return amconvolution_internal(
       input,  # pylint: disable=redefined-builtin
       filters,
@@ -219,7 +219,7 @@ def amconvolution_v2(  # pylint: disable=missing-docstring
       dilations=dilations,
       name=name,
       mant_mul_lut=mant_mul_lut,
-      fp8=fp8)
+      FPMode=FPMode)
 
 @ops.RegisterGradient("Convam")
 def _convam_grad_cc(op,grad):
@@ -229,7 +229,7 @@ def _convam_grad_cc(op,grad):
   padding = op.get_attr("padding")
   data_format = op.get_attr("data_format")
   mant_mul_lut = op.get_attr("mant_mul_lut")
-  fp8 = op.get_attr("fp8")
+  FPMode = op.get_attr("FPMode")
   # shape_0 input shape_1 filter
   shape_0 = array_ops.shape(op.inputs[0])
   shape_1 = array_ops.shape(op.inputs[1])
@@ -239,7 +239,7 @@ def _convam_grad_cc(op,grad):
           padding=padding,
           data_format=data_format,
           mant_mul_lut=mant_mul_lut,
-          fp8=fp8
+          FPMode=FPMode
           ),
           convam_module.convam_filter_grad(shape_1,op.inputs[0], grad,
           dilations=dilations,
@@ -247,5 +247,5 @@ def _convam_grad_cc(op,grad):
           padding=padding,
           data_format=data_format,
           mant_mul_lut=mant_mul_lut,
-          fp8=fp8
+          FPMode=FPMode
           )]

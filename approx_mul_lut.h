@@ -31,9 +31,12 @@ public:
         //             tensorflow::errors::InvalidArgument("No mant LUT file name given"));
 
         if (mant_lut_file_name.empty()) {
+            
+
             lut_ = false;
             return;
         }
+        lut_ = true;
         if (!fp8_) {
             unsigned start_delimiter = mant_lut_file_name.find_last_of("_");
             unsigned stop_delimiter = mant_lut_file_name.find_last_of(".");

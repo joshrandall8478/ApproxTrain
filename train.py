@@ -11,37 +11,42 @@ from datasets.cifar_data import load_cifar_data
 
 from python.keras.layers.am_convolutional import AMConv2D
 from python.keras.layers.amdenselayer import denseam
+import time
+class BatchTimeLogger(tf.keras.callbacks.Callback):
+    def on_train_begin(self, logs=None):
+        self.batch_times = []
+        self.batch_start_time = None
+
+    def on_batch_begin(self, batch, logs=None):
+        self.batch_start_time = time.time()
+
+    def on_batch_end(self, batch, logs=None):
+        if self.batch_start_time is not None:
+            batch_time = time.time() - self.batch_start_time
+            self.batch_times.append(batch_time)
+
+    def on_train_end(self, logs=None):
+        if self.batch_times:
+            self.avg_batch_time = sum(self.batch_times) / len(self.batch_times)
+        else:
+            self.avg_batch_time = 0.0
 
 def main():
     # Argument parser setup
     parser = argparse.ArgumentParser(description="Train a model with customizable options.")
     parser.add_argument("--SEED", type=int, default=0, help="Random seed")
     parser.add_argument("--LUT", type=str, help="Path to the LUT file")
-    parser.add_argument("--EPOCH", type=int, default=20, help="Number of epochs")
+    parser.add_argument("--EPOCH", type=int, default=5, help="Number of epochs")
     parser.add_argument("--EARLYSTOPPING", action='store_true', help="Enable early stopping")
-    parser.add_argument("--ROUNDING", type=str, required=True, help="Rounding mode")
-    parser.add_argument("--FP16", action='store_true', help="Use FP16 mode")
-    parser.add_argument("--FP8", action='store_true', help="Use FP8 mode")
+    parser.add_argument("--ROUNDING", type=str, required=True, choices=['RNE','RTZ'], help="Rounding mode (you have to recompile ApproxTrain if you change the rounding mode)")
+    # add a new argument to specify the FPMode
+    parser.add_argument("--FPMode", type=str, required=True, choices=['FP32', 'FP16', 'BF16', 'FP8E5M2', 'FP8HYB'], help="FPMode to use for training")
     parser.add_argument("--MODEL", type=str, required=True, choices=['lenet300100', 'lenet5', 'resnet18', 'resnet34', 'resnet50'], help="Model architecture to train")
     parser.add_argument("--DATASET", type=str, required=True, choices=['mnist', 'cifar10', 'cifar100'], help="Dataset to use for training")
     args = parser.parse_args()
-
-    # Check LUT requirement
-    if not (args.FP16 or args.FP8) and not args.LUT:
-        parser.error("Argument --LUT is required unless --FP16 or --FP8 is specified")
-    if args.FP16 and args.FP8:
-        parser.error("Cannot specify both --FP16 and --FP8")
-
-    # Determine LUT file
-    if args.FP16:
-        lut_file_name = "FP16"
-        lut_file = "lut/ZEROS_7.bin"
-    elif args.FP8:
-        lut_file_name = "FP8"
-        lut_file = "lut/FP8/combined_fp8_mul_lut.bin"
-    else:
-        lut_file_name = re.match(r"(.+)\.bin$", os.path.basename(args.LUT)).group(1) if args.LUT else "default"
-        lut_file = args.LUT
+    
+    lut_file_name = re.match(r"(.+)\.bin$", os.path.basename(args.LUT)).group(1) if args.LUT else "default"
+    lut_file = args.LUT
 
     rnd = args.ROUNDING
     tf.random.set_seed(args.SEED)
@@ -58,9 +63,9 @@ def main():
     strategy = tf.distribute.MirroredStrategy()
     with strategy.scope():
         if args.MODEL.startswith('lenet'):
-            model = build_lenet(args.MODEL, input_shape, num_classes, lut_file, args.FP8)
+            model = build_lenet(args.MODEL, input_shape, num_classes, lut_file, args.FPMode)
         elif args.MODEL.startswith('resnet'):
-            model = build_resnet(args.MODEL, input_shape, num_classes, lut_file, args.FP8)
+            model = build_resnet(args.MODEL, input_shape, num_classes, lut_file, args.FPMode)
         else:
             raise ValueError(f"Unsupported model: {args.MODEL}")
 
@@ -71,9 +76,9 @@ def main():
     os.makedirs("save/training_stats", exist_ok=True)
 
     # Callbacks
-    checkpoint_path = f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{rnd}.h5"
+    checkpoint_path = f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}.h5"
     if args.EARLYSTOPPING:
-        checkpoint_path = f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_earlystopping_{rnd}.h5"
+        checkpoint_path = f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_earlystopping_{rnd}.h5"
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_path,
         monitor='val_accuracy',
@@ -90,7 +95,8 @@ def main():
             verbose=1
         )
         callbacks.append(early_stopping_callback)
-
+    batch_time_logger = BatchTimeLogger()
+    callbacks.append(batch_time_logger)
     # Training
     history = model.fit(
         ds_train,
@@ -111,10 +117,11 @@ def main():
         "val_accuracy": history.history['val_accuracy'],
         "test_loss": test_loss,
         "test_accuracy": test_accuracy,
+        "avg_batch_time": batch_time_logger.avg_batch_time
     }
-    stats_path = f"save/training_stats/{args.MODEL}_{args.DATASET}_{lut_file_name}_{rnd}.json"
+    stats_path = f"save/training_stats/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}.json"
     if args.EARLYSTOPPING:
-        stats_path = f"save/training_stats/{args.MODEL}_{args.DATASET}_{lut_file_name}_earlystopping_{rnd}.json"
+        stats_path = f"save/training_stats/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_earlystopping.json"
     with open(stats_path, "w") as f:
         json.dump(training_stats, f)
     print(f"Training statistics saved to {stats_path}")

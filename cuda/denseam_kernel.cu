@@ -8,6 +8,7 @@
 #include "approx_mul_lut.h"
 #include <cuda_fp16.h>
 #include "fp8_conversion.cuh"
+#include <iostream>
 using namespace tensorflow;
 using GpuDevice = Eigen::GpuDevice;
 // start of new kernels
@@ -458,6 +459,8 @@ __global__ void DenseamKernel_lut_5exp(
         output[ix] = T(0);
         for (int ix_input = 0; ix_input < input_width; ix_input++)
         {
+            T a = inputs[ix_sample*input_width+ix_input];
+            T b = weights[ix_input*units+ix_unit];
             T mul = clip_fp16(a) * clip_fp16(b);
             output[ix] = fp32_add(mul, output[ix]);
         }  
@@ -485,6 +488,8 @@ __global__ void DenseamWeightsKernel_lut_5exp(
         grad_weights[ix] = T(0);
         for (int ix_sample = 0; ix_sample < batch; ix_sample++)
         {
+            T a = inputs[input_width*ix_sample+ix_input];
+            T b = grads[ix_sample*units+ix_unit];
             T mul = clip_fp16(a) * clip_fp16(b);
             grad_weights[ix] = fp32_add(mul, grad_weights[ix]);
         }  
@@ -513,6 +518,8 @@ __global__ void DenseamInputKernel_lut_5exp(
 
         for (int ix_unit = 0; ix_unit < units; ix_unit++)
         {   
+            T a = weights[ix_input*units+ ix_unit];
+            T b = grads[ix_sample*units+ix_unit];
             T mul = clip_fp16(a) * clip_fp16(b);
             grad_inputs[ix] = fp32_add(mul, grad_inputs[ix]);
         }
@@ -651,25 +658,29 @@ void DenseamFunctor<GpuDevice, T>::operator()(
 { 
     unsigned blocksize = 1024;
     unsigned gridsize = (batch*units+blocksize -1)/blocksize;
+    // //print floatmode
+    // std::cout << "FloatMode: " << FloatModeToString(mode) << std::endl;
+    // // print if lut is used
+    // std::cout << "LUT: " << mul_lut.is_lut() << std::endl;
     // check if mul_lut
     if (mul_lut.is_lut()){
         // using case for different float modes
         switch (mode){
             case FloatMode::FP8E5M2:  
                 // use DenseamKernel_lut_e5m2 with lut for both forward pass  
-                DenseamKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_lut_text_());
+                DenseamKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP8HYB:
                 // use DenseamKernel_lut_e4m3 with lut for forward pass    
-                DenseamKernel_lut_e4m3<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_lut_text_());
+                DenseamKernel_lut_e4m3<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP16:
                 // use denseamkernel_5exp with lut for both forward pass
-                DenseamKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_lut_text_(), mul_lut.get_mant_mask(), mul_lut.get_a_shift(), mul_lut.get_b_shift(), mul_lut.get_mant_bitwidth());
+                DenseamKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
                 break;
             case FloatMode::BF16:
                 // use DenseamKernel_lut with lut for both forward pass
-                DenseamKernel_lut<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_lut_text_(), mul_lut.get_mant_mask(), mul_lut.get_a_shift(), mul_lut.get_b_shift(), mul_lut.get_mant_bitwidth());
+                DenseamKernel_lut<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
                 break;
             case FloatMode::FP32:
                 // use DenseamKernel for forward pass
@@ -726,19 +737,19 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
         switch (mode){
             case FloatMode::FP8E5M2:  
                 // use DenseamWeightsKernel_lut_e5m2 with lut for backward pass
-                DenseamWeightsKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_lut_text_());
+                DenseamWeightsKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP8HYB:
                 // use DenseamWeightsKernel_lut_e4m3 with lut for backward pass    
-                DenseamWeightsKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_lut_text_());
+                DenseamWeightsKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP16:
                 // use denseamweightskernel_5exp with lut for backward pass
-                DenseamWeightsKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_lut_text_(), mul_lut.get_mant_mask(), mul_lut.get_a_shift(), mul_lut.get_b_shift(), mul_lut.get_mant_bitwidth());
+                DenseamWeightsKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
                 break;
             case FloatMode::BF16:
                 // use DenseamWeightsKernel_lut with lut for backward pass
-                DenseamWeightsKernel_lut<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_lut_text_(), mul_lut.get_mant_mask(), mul_lut.get_a_shift(), mul_lut.get_b_shift(), mul_lut.get_mant_bitwidth());
+                DenseamWeightsKernel_lut<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
                 break;
             case FloatMode::FP32:
                 // use DenseamWeightsKernel for backward pass
@@ -796,19 +807,19 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
         switch (mode){
             case FloatMode::FP8E5M2:  
                 // use DenseamInputKernel_lut_e5m2 with lut for backward pass
-                DenseamInputKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_lut_text_());
+                DenseamInputKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP8HYB:
                 // use DenseamInputKernel_lut_e4m3 with lut for backward pass    
-                DenseamInputKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_lut_text_());
+                DenseamInputKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP16:
                 // use denseaminputkernel_5exp with lut for backward pass
-                DenseamInputKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_lut_text_(), mul_lut.get_mant_mask(), mul_lut.get_a_shift(), mul_lut.get_b_shift(), mul_lut.get_mant_bitwidth());
+                DenseamInputKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
                 break;
             case FloatMode::BF16:
                 // use DenseamInputKernel_lut with lut for backward pass
-                DenseamInputKernel_lut<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_lut_text_(), mul_lut.get_mant_mask(), mul_lut.get_a_shift(), mul_lut.get_b_shift(), mul_lut.get_mant_bitwidth());
+                DenseamInputKernel_lut<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
                 break;
             case FloatMode::FP32:
                 // use DenseamInputKernel for backward pass
