@@ -82,3 +82,6 @@ lut/*.bin
 seavenv
 *.out
 save/
+*out*
+*.csv
+*.h5

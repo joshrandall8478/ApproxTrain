@@ -417,7 +417,7 @@ void ConvamFilterGradKernelLauncher(
     const size_t ldc = n;
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad, ldb, out, ldc, blockSize, gridSize, mul_lut, mode, true);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad, ldb, out, ldc, blockSize, gridSize, mul_lut, mode, false);
 };
 
 template <typename T>
@@ -572,7 +572,7 @@ void ConvamInputGradKernelLauncher(
     gpuErrchk( cudaDeviceSynchronize() );
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, rsfilter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, rsfilter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, false);
 };
 
 template <typename T>

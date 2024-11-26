@@ -6,13 +6,7 @@
 #include <cuda_fp16.h>
 #include <stdint.h>
 
-// Constants for FP8 e4m3 format
-#define E4M3_EXP_BITS 4
-#define E4M3_EXP_BIAS 7
-#define E4M3_MAN_BITS 3
-#define E4M3_MAX_EXP 8
-#define E4M3_MIN_EXP -7
-#define E4M3_MAX_FINITE 240  // 0b11110000
+
 
 // Constants for FP8 e5m2 format
 #define E5M2_EXP_BITS 5
@@ -62,7 +56,13 @@ union Float32Bits {
 // Notes:
 // - e4m3 does not represent Infinities.
 // - Subnormals are represented but have limited precision.
-
+// Constants for FP8 e4m3 format
+#define E4M3_EXP_BITS 4
+#define E4M3_EXP_BIAS 7
+#define E4M3_MAN_BITS 3
+#define E4M3_MAX_EXP 7
+#define E4M3_MIN_EXP -6
+#define E4M3_MAX_FINITE 240  // 0b11110000
 
 
 __device__ __forceinline__ uint8_t fp32_to_e4m3(float f) {
@@ -70,57 +70,48 @@ __device__ __forceinline__ uint8_t fp32_to_e4m3(float f) {
     f_bits.f = f;
     uint32_t bits = f_bits.u;
 
-    uint32_t sign = (bits >> 31) & 0x1;
+    uint32_t sign = (bits >> 31); // Sign bit
     int32_t exponent = ((bits >> 23) & 0xFF) - 127;  // Unbiased exponent
+    uint32_t unbiassed_exponent = (bits >> 23) & 0xFF;
     uint32_t mantissa = bits & 0x7FFFFF;             // Mantissa (23 bits)
-
-    uint8_t fp8_bits = 0;
-
-    // Handle Zero
+    
+    uint8_t sign_bit = sign << 7;
+    // Handle zero or biased exponent all 0s
     if (exponent == -127 && mantissa == 0) {
-        return static_cast<uint8_t>(sign << 7);
+        return sign_bit;
+    }
+    // handle nan
+    if (unbiassed_exponent == 0xFF && mantissa != 0) {
+        // - Exponent Bits = 15, Mantissa = 111: NaN
+        return sign_bit |static_cast<uint8_t>(0x7F);
+    }
+    // handle infinity, also include sign.
+
+    if(unbiassed_exponent == 0xFF && mantissa == 0){
+        //Exponent Bits = 15, Mantissa = 110: Max Normal
+        return sign_bit | static_cast<uint8_t>(0x78);
     }
 
-    // Adjust exponent for FP8 e4m3
+    // new exponent
     int32_t new_exp = exponent + E4M3_EXP_BIAS;
+    // if new_exp < 0, map to 0
     uint8_t exp_bits;
     uint8_t man_bits;
-
-    // Handle Subnormal Numbers
-    if (new_exp <= 0) {
-        // Subnormal representation
-        // In e4m3, subnormals have Exponent Bits = 0 and non-zero Mantissa
-        // However, since e4m3 has only 3 Mantissa bits, we'll extract the top 3 bits from the FP32 mantissa
-        // Shift mantissa to align with e4m3's mantissa bits
-        // No rounding is applied
-        uint32_t shifted_mantissa = mantissa >> (23 - E4M3_MAN_BITS);
-        man_bits = static_cast<uint8_t>(shifted_mantissa & 0x7);
-        exp_bits = 0;
-    }
-    // Handle Special Cases (NaN and Max Normal)
-    else if (new_exp >= E4M3_MAX_EXP) {  // new_exp >=15
-        exp_bits = 15;  // 0b1111
-        if (mantissa != 0) {
-            // NaN: Exponent=15, Mantissa=111
-            man_bits = 7;  // 0b111
-        }
-        else {
-            // Max Normal: Exponent=15, Mantissa=110
-            man_bits = 6;  // 0b110
+    if (new_exp < 0) {
+        // map to 0, underflow
+        return sign_bit;
+    } else if (new_exp > 15) {
+        // map to max normal, overflow
+        return sign_bit | static_cast<uint8_t>(0x78);
+    } else {
+        exp_bits = new_exp << 3;
+        man_bits = mantissa >> 20;
+        // if exp is all ones, then mantissa should never be equal to 111
+        if (new_exp == 15) {
+            man_bits &= 0x6;
         }
     }
-    // Handle Normal Numbers
-    else {  // 1 <= new_exp <=14: Normal numbers
-        exp_bits = static_cast<uint8_t>(new_exp & 0xF);  // Ensure it's within 4 bits
-
-        // Extract the top 3 mantissa bits from FP32 mantissa
-        // No rounding is applied; bits are truncated
-        man_bits = static_cast<uint8_t>((mantissa >> (23 - E4M3_MAN_BITS)) & 0x7);
-    }
-
-    // Assemble the FP8 bits
-    fp8_bits = (sign << 7) | (exp_bits << E4M3_MAN_BITS) | man_bits;
-    return fp8_bits;
+    return sign_bit |   exp_bits | man_bits;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -169,8 +160,24 @@ __device__ __forceinline__ uint8_t fp32_to_e5m2(float f) {
     return fp8_bits;
 }
 ////////////////////////////////////////////////////////////////////////////////
-// FP8 E4M3 to FP32 Conversion
-////////////////////////////////////////////////////////////////////////////////
+// FP32 to FP8 e4m3 Conversion
+//////////////////////////////////////////////////////////////////////////////
+// E4M3 Format Specifications:
+// - 1 Sign Bit
+// - 4 Exponent Bits (Bias: 7)
+// - 3 Mantissa Bits
+//
+// Special Cases:
+// - Exponent Bits = 0, Mantissa = 0: Zero
+// - Exponent Bits = 0, Mantissa != 0: Subnormal
+// - Exponent Bits = 15, Mantissa = 111: NaN
+// - Exponent Bits = 15, Mantissa = 110: Max Normal
+// - Exponent Bits = 15, Mantissa = 101: A number smaller than the max normal but bigger than Exponent = 15 and Mantissa = 100
+// - Exponent Bits = 1, Mantissa = 000: Min Normal
+//
+// Notes:
+// - e4m3 does not represent Infinities.
+// - Subnormals are represented but have limited precision.
 __device__ __forceinline__ float e4m3_to_fp32(uint8_t fp8_val) {
     // get sign of e4m3
     uint8_t sign = (fp8_val >> 7) & 0x1;

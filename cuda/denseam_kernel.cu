@@ -740,7 +740,7 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
                 DenseamWeightsKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP8HYB:
-                // use DenseamWeightsKernel_lut_e4m3 with lut for backward pass    
+                // use DenseamWeightsKernel_lut_e5m2 with lut for backward pass    
                 DenseamWeightsKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP16:
@@ -768,7 +768,7 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
                 DenseamWeightsKernel_fp8_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output);
                 break;
             case FloatMode::FP8HYB:
-                // use DenseamWeightsKernel_fp8_e4m3 without lut for backward pass
+                // use DenseamWeightsKernel_fp8_e5m2 without lut for backward pass
                 DenseamWeightsKernel_fp8_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output);
                 break;
             case FloatMode::FP16:
@@ -810,7 +810,7 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
                 DenseamInputKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP8HYB:
-                // use DenseamInputKernel_lut_e4m3 with lut for backward pass    
+                // use DenseamInputKernel_lut_e5m2 with lut for backward pass    
                 DenseamInputKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP16:

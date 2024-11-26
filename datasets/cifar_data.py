@@ -1,71 +1,56 @@
+# datasets/cifar_data.py
+
 import tensorflow as tf
-import tensorflow_datasets as tfds
-import random
+from tensorflow.keras.datasets import cifar10, cifar100
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 import numpy as np
-import os
 
-def set_seed(seed=0):
-    """
-    Set seeds for reproducibility across various libraries and TensorFlow configurations.
-    """
-    # Set PYTHONHASHSEED environment variable
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    
-    # Set Python's random module seed
-    random.seed(seed)
-    
-    # Set NumPy's RNG seed
-    np.random.seed(seed)
-    
-    # Set TensorFlow's RNG seed
-    tf.random.set_seed(seed)
-    
-    # Configure TensorFlow for deterministic operations
-    os.environ['TF_DETERMINISTIC_OPS'] = '1'
-    os.environ['TF_CUDNN_DETERMINISTIC'] = '1'  # Optional: Enable if using cuDNN
+def load_cifar_data(dataset_name, batch_size=128):
+    """Loads CIFAR data and returns training and validation generators."""
+    if dataset_name == 'cifar10':
+        (train_images, train_labels), (test_images, test_labels) = cifar10.load_data()
+        num_classes = 10
+    elif dataset_name == 'cifar100':
+        (train_images, train_labels), (test_images, test_labels) = cifar100.load_data()
+        num_classes = 100
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
 
-def load_cifar_data(dataset_name, seed=0):
-    # Set the seed inside the function to ensure it's applied here as well
-    tf.random.set_seed(seed)
-    random.seed(seed)
-    np.random.seed(seed)
+
+    train_images = train_images.astype('float32')
+    test_images = test_images.astype('float32')
     
-    # Load the dataset with shuffled files
-    (ds_train, ds_test), ds_info = tfds.load(
-        dataset_name,
-        split=['train', 'test'],
-        shuffle_files=True,
-        as_supervised=True,
-        with_info=True,
+    # Compute per-channel mean and std for normalization
+    mean = np.mean(train_images, axis=(0, 1, 2))
+    std = np.std(train_images, axis=(0, 1, 2))
+    
+    def preprocess_input(x):
+        """Preprocess input by normalizing with mean and std."""
+        x = (x - mean) / (std + 1e-7)
+        # pad width with 4 pixels, then randomly crop to 32x32
+        x = tf.pad(x, [[4, 4], [4, 4], [0, 0]])
+        x = tf.image.random_crop(x, size=[32, 32, 3])
+        return x
+    
+    # Data augmentation for training data
+    train_datagen = ImageDataGenerator(
+        preprocessing_function=preprocess_input,
+        width_shift_range=0.125,  # 0.125 * 32 = 4 pixels
+        height_shift_range=0.125,
+        horizontal_flip=True,
     )
     
-    def normalize_img(image, label):
-        image = tf.cast(image, tf.float32) / 255.0
-        return image, label
+    # Only normalization for validation data
+    val_datagen = ImageDataGenerator(
+        preprocessing_function=preprocess_input
+    )
+
     
-    # Split validation set from training data
-    val_size = int(0.1 * ds_info.splits['train'].num_examples)
-    ds_val = ds_train.take(val_size)
-    ds_train = ds_train.skip(val_size)
+    # Create generators
+    train_generator = train_datagen.flow(train_images, tf.keras.utils.to_categorical(train_labels, num_classes),
+                                         batch_size=batch_size)
+    val_generator = val_datagen.flow(test_images, tf.keras.utils.to_categorical(test_labels, num_classes),
+                                     batch_size=batch_size)
     
-    # Dataset preparation with seeds in shuffle
-    ds_train = ds_train.map(normalize_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    ds_train = ds_train.cache()
-    ds_train = ds_train.shuffle(buffer_size=45000, seed=seed, reshuffle_each_iteration=False)
-    ds_train = ds_train.batch(128)
-    ds_train = ds_train.prefetch(tf.data.experimental.AUTOTUNE)
-    
-    ds_val = ds_val.map(normalize_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    ds_val = ds_val.cache()
-    ds_val = ds_val.batch(128)
-    ds_val = ds_val.prefetch(tf.data.experimental.AUTOTUNE)
-    
-    ds_test = ds_test.map(normalize_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    ds_test = ds_test.cache()
-    ds_test = ds_test.batch(128)
-    ds_test = ds_test.prefetch(tf.data.experimental.AUTOTUNE)
-    
-    input_shape = (32, 32, 3)
-    num_classes = 10 if dataset_name.lower() == 'cifar10' else 100
-    
-    return ds_train, ds_val, ds_test, input_shape, num_classes
+    input_shape = train_images.shape[1:]
+    return train_generator, val_generator, input_shape, num_classes

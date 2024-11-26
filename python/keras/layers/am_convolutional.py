@@ -364,7 +364,9 @@ class AMConv(Layer):
     }
     base_config = super(AMConv, self).get_config()
     return dict(list(base_config.items()) + list(config.items()))
-
+  @classmethod
+  def from_config(cls, config, mant_mul_lut=None, FPMode=None):
+        return cls(**config, mant_mul_lut=mant_mul_lut, FPMode=FPMode)
   def _compute_causal_padding(self, inputs):
     """Calculates padding for 'causal' option for 1-d conv layers."""
     left_pad = self.dilation_rate[0] * (self.kernel_size[0] - 1)
@@ -563,5 +565,6 @@ class AMConv2D(AMConv):
         mant_mul_lut=mant_mul_lut,
         FPMode=FPMode,
         **kwargs)
+      
 
 
