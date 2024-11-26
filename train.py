@@ -19,10 +19,10 @@ class BatchTimeLogger(tf.keras.callbacks.Callback):
         self.batch_times = []
         self.batch_start_time = None
 
-    def on_batch_begin(self, batch, logs=None):
+    def on_train_batch_begin(self, batch, logs=None):
         self.batch_start_time = time.time()
 
-    def on_batch_end(self, batch, logs=None):
+    def on_train_batch_end(self, batch, logs=None):
         if self.batch_start_time is not None:
             batch_time = time.time() - self.batch_start_time
             self.batch_times.append(batch_time)
@@ -32,6 +32,16 @@ class BatchTimeLogger(tf.keras.callbacks.Callback):
             self.avg_batch_time = sum(self.batch_times) / len(self.batch_times)
         else:
             self.avg_batch_time = 0.0
+
+# New callback to record batch-wise loss and accuracy
+class BatchMetricsLogger(tf.keras.callbacks.Callback):
+    def on_train_begin(self, logs=None):
+        self.batch_loss = []
+        self.batch_accuracy = []
+
+    def on_train_batch_end(self, batch, logs=None):
+        self.batch_loss.append(logs.get('loss'))
+        self.batch_accuracy.append(logs.get('accuracy'))
 
 def main():
     # Argument parser setup
@@ -46,7 +56,7 @@ def main():
     parser.add_argument("--MODEL", type=str, required=True, choices=['lenet300100', 'lenet5', 'resnet20', 'resnet32', 'resnet44', 'resnet56', 'resnet110', 'resnet1202'], help="Model architecture to train")
     parser.add_argument("--DATASET", type=str, required=True, choices=['mnist', 'cifar10', 'cifar100'], help="Dataset to use for training")
     # add a new args to specify test mode
-    parser.add_argument("--TEST", action='store_true', default=False,help="Test the model")
+    parser.add_argument("--TEST", action='store_true', default=False, help="Test the model")
     args = parser.parse_args()
     
     lut_file_name = re.match(r"(.+)\.bin$", os.path.basename(args.LUT)).group(1) if args.LUT else "default"
@@ -84,7 +94,7 @@ def main():
         
         model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
         model.summary()
-    
+
 
     if args.TEST:
         # load the model specified by the user
@@ -118,11 +128,14 @@ def main():
         callbacks.append(early_stopping_callback)
     batch_time_logger = BatchTimeLogger()
     callbacks.append(batch_time_logger)
+
+    # Instantiate and add the new BatchMetricsLogger callback
+    batch_metrics_logger = BatchMetricsLogger()
+    callbacks.append(batch_metrics_logger)
     print("Setting up callbacks...")
 
-
     # Learning rate schedule for ResNet
-    if args.MODEL.startswith ('resnet'): 
+    if args.MODEL.startswith('resnet'): 
         # Define learning rate schedule
         def lr_schedule(epoch):
             lr = 0.1
@@ -157,6 +170,8 @@ def main():
         "train_accuracy": history.history['accuracy'],
         "val_loss": history.history['val_loss'],
         "val_accuracy": history.history['val_accuracy'],
+        "batch_loss": batch_metrics_logger.batch_loss,
+        "batch_accuracy": batch_metrics_logger.batch_accuracy,
         "test_loss": test_loss,
         "test_accuracy": test_accuracy,
         "avg_batch_time": batch_time_logger.avg_batch_time
