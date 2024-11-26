@@ -45,6 +45,8 @@ def main():
     parser.add_argument("--FPMode", type=str, required=True, choices=['FP32', 'FP16', 'BF16', 'FP8E5M2', 'FP8HYB'], help="FPMode to use for training")
     parser.add_argument("--MODEL", type=str, required=True, choices=['lenet300100', 'lenet5', 'resnet20', 'resnet32', 'resnet44', 'resnet56', 'resnet110', 'resnet1202'], help="Model architecture to train")
     parser.add_argument("--DATASET", type=str, required=True, choices=['mnist', 'cifar10', 'cifar100'], help="Dataset to use for training")
+    # add a new args to specify test mode
+    parser.add_argument("--TEST", action='store_true', default=False,help="Test the model")
     args = parser.parse_args()
     
     lut_file_name = re.match(r"(.+)\.bin$", os.path.basename(args.LUT)).group(1) if args.LUT else "default"
@@ -57,7 +59,7 @@ def main():
     if args.DATASET == 'mnist':
         ds_train, ds_val, ds_test, input_shape, num_classes = load_mnist_data()
     elif args.DATASET in ['cifar10', 'cifar100']:
-        ds_train, ds_val, input_shape, num_classes = load_cifar_data(args.DATASET)
+        ds_train, ds_val, ds_test, input_shape, num_classes = load_cifar_data(args.DATASET)
     else:
         raise ValueError(f"Unsupported dataset: {args.DATASET}")
 
@@ -65,25 +67,26 @@ def main():
     strategy = tf.distribute.MirroredStrategy()
     with strategy.scope():
         if args.MODEL.startswith('lenet'):
-            if args.MODEL == 'lenet5':
-                model = build_lenet5(input_shape, num_classes, lut_file, args.FPMode)
+            if args.MODEL == 'lenet5' or args.MODEL == 'lenet300100':
+                model = build_lenet(args.MODEL, input_shape, num_classes, lut_file, args.FPMode)
             else:
                 raise ValueError(f"Unsupported LeNet model: {args.MODEL}")
             optimizer = tf.keras.optimizers.Adam()
+            loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
         elif args.MODEL.startswith('resnet'):
             depth = int(args.MODEL.replace('resnet', ''))
             model = build_resnet_cifar(input_shape=input_shape, num_classes=num_classes, depth=depth)
-            # Use SGD with momentum
-            initial_lr = 0.1
-            optimizer = tf.keras.optimizers.SGD(learning_rate=initial_lr, momentum=0.9, nesterov=True)
+            # Use SGD with momentum for ResNet
+            optimizer = tf.keras.optimizers.SGD(learning_rate=0.1, momentum=0.9, nesterov=True)
+            loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
         else:
             raise ValueError(f"Unsupported model: {args.MODEL}")
-        loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
+        
         model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
         model.summary()
     
-    test=False
-    if test:
+
+    if args.TEST:
         # load the model specified by the user
         model.load_weights(f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}.h5")
         model.evaluate(ds_test)
@@ -117,18 +120,21 @@ def main():
     callbacks.append(batch_time_logger)
     print("Setting up callbacks...")
 
-    # Define learning rate schedule
-    def lr_schedule(epoch):
-        lr = 0.1
-        if epoch >= 150:
-            lr *= 0.01
-        elif epoch >= 100:
-            lr *= 0.1
-        print('Learning rate: ', lr)
-        return lr
-    
-    lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
-    callbacks.append(lr_scheduler)
+
+    # Learning rate schedule for ResNet
+    if args.MODEL.startswith ('resnet'): 
+        # Define learning rate schedule
+        def lr_schedule(epoch):
+            lr = 0.1
+            if epoch >= 150:
+                lr *= 0.01
+            elif epoch >= 100:
+                lr *= 0.1
+            print('Learning rate: ', lr)
+            return lr
+        
+        lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
+        callbacks.append(lr_scheduler)
 
     # Training
     history = model.fit(
@@ -141,8 +147,8 @@ def main():
     )
 
     # Evaluation
-    # For CIFAR datasets, reuse ds_val as ds_test since they are the same
-    test_loss, test_accuracy = model.evaluate(ds_val, steps=ds_val.n // ds_val.batch_size)
+
+    test_loss, test_accuracy = model.evaluate(ds_test, steps=ds_test.n // ds_test.batch_size)
     print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
 
     # Save stats
