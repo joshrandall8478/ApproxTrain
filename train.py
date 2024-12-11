@@ -69,7 +69,7 @@ def main():
     if args.DATASET == 'mnist':
         ds_train, ds_val, ds_test, input_shape, num_classes = load_mnist_data()
     elif args.DATASET in ['cifar10', 'cifar100']:
-        ds_train, ds_val, ds_test, input_shape, num_classes = load_cifar_data(args.DATASET)
+        ds_train, ds_val, input_shape, num_classes = load_cifar_data(args.DATASET)
     else:
         raise ValueError(f"Unsupported dataset: {args.DATASET}")
 
@@ -85,9 +85,13 @@ def main():
             loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
         elif args.MODEL.startswith('resnet'):
             depth = int(args.MODEL.replace('resnet', ''))
-            model = build_resnet_cifar(input_shape=input_shape, num_classes=num_classes, depth=depth)
+            model = build_resnet_cifar(input_shape=input_shape, num_classes=num_classes, depth=depth, lut_file=lut_file, FPMode=args.FPMode)
             # Use SGD with momentum for ResNet
-            optimizer = tf.keras.optimizers.SGD(learning_rate=0.1, momentum=0.9, nesterov=True)
+            # learning_rate = 0.1
+            learning_rate = tf.keras.optimizers.schedules.PiecewiseConstantDecay(\
+        [32000, 48000],\
+        [0.1, 0.01, 0.001])
+            optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
             loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
         else:
             raise ValueError(f"Unsupported model: {args.MODEL}")
@@ -134,20 +138,20 @@ def main():
     callbacks.append(batch_metrics_logger)
     print("Setting up callbacks...")
 
-    # Learning rate schedule for ResNet
-    if args.MODEL.startswith('resnet'): 
-        # Define learning rate schedule
-        def lr_schedule(epoch):
-            lr = 0.1
-            if epoch >= 150:
-                lr *= 0.01
-            elif epoch >= 100:
-                lr *= 0.1
-            print('Learning rate: ', lr)
-            return lr
+    # # Learning rate schedule for ResNet
+    # if args.MODEL.startswith('resnet'): 
+    #     # Define learning rate schedule
+    #     def lr_schedule(epoch):
+    #         lr = 0.1
+    #         if epoch >= 150:
+    #             lr *= 0.01
+    #         elif epoch >= 100:
+    #             lr *= 0.1
+    #         print('Learning rate: ', lr)
+    #         return lr
         
-        lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
-        callbacks.append(lr_scheduler)
+    #     lr_scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
+    #     callbacks.append(lr_scheduler)
 
     # Training
     history = model.fit(
@@ -161,8 +165,13 @@ def main():
 
     # Evaluation
 
-    test_loss, test_accuracy = model.evaluate(ds_test, steps=ds_test.n // ds_test.batch_size)
-    print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
+    # test_loss, test_accuracy = model.evaluate(ds_test)
+    if args.MODEL == 'lenet5' or args.MODEL == 'lenet300100':
+        test_loss, test_accuracy = model.evaluate(ds_test, steps=ds_test.n // ds_test.batch_size)
+        print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
+    else:
+        test_loss, test_accuracy = model.evaluate(ds_val, steps=ds_val.n // ds_val.batch_size)
+        print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
 
     # Save stats
     training_stats = {

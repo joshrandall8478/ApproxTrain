@@ -242,11 +242,7 @@ __global__ void DenseamInputKernel_fp16(
     }
 };
 /* non-lut fp8*/
-// clip the values to fp8 then convert it back to fp32 (truncation)
-// fp32 to e4m3 then convert back to fp32
-__device__ __forceinline__ float clip_fp8_e4m3(float a) {
-    return e4m3_to_fp32(fp32_to_e4m3(a));
-}
+
 template <typename T>
 __global__ void DenseamKernel_fp8_e4m3(
     const T* inputs,
@@ -270,10 +266,7 @@ __global__ void DenseamKernel_fp8_e4m3(
         }  
     }
 };
-// fp32 to e5m2 then convert back to fp32
-__device__ __forceinline__ float clip_fp8_e5m2(float a) {
-    return e5m2_to_fp32(fp32_to_e5m2(a));
-}
+
 template <typename T>
 __global__ void DenseamKernel_fp8_e5m2(
     const T* inputs,
@@ -545,8 +538,8 @@ __global__ void DenseamKernel_lut_e5m2(
         output[ix] = T(0);
         for (int ix_input = 0; ix_input < input_width; ix_input++)
         {
-            uint8_t a_key = fp32_to_e5m2(inputs[ix_sample*input_width+ix_input]);
-            uint8_t b_key = fp32_to_e5m2(weights[ix_input*units+ix_unit]);
+            uint8_t a_key = fp32_to_fp8_e5m2(inputs[ix_sample*input_width+ix_input]);
+            uint8_t b_key = fp32_to_fp8_e5m2(weights[ix_input*units+ix_unit]);
 
             uint32_t index = (a_key << 8) | b_key+256*256;
 
@@ -575,8 +568,8 @@ __global__ void DenseamWeightsKernel_lut_e5m2(
         grad_weights[ix] = T(0);
         for (int ix_sample = 0; ix_sample < batch; ix_sample++)
         {
-            uint8_t a_key = fp32_to_e5m2(inputs[input_width*ix_sample+ix_input]);
-            uint8_t b_key = fp32_to_e5m2(grads[ix_sample*units+ix_unit]);
+            uint8_t a_key = fp32_to_fp8_e5m2(inputs[input_width*ix_sample+ix_input]);
+            uint8_t b_key = fp32_to_fp8_e5m2(grads[ix_sample*units+ix_unit]);
 
             uint32_t index = (a_key << 8) | b_key+256*256;
 
@@ -606,8 +599,8 @@ __global__ void DenseamInputKernel_lut_e5m2(
 
         for (int ix_unit = 0; ix_unit < units; ix_unit++)
         {   
-            uint8_t a_key = fp32_to_e5m2(weights[ix_input*units+ ix_unit]);
-            uint8_t b_key = fp32_to_e5m2(grads[ix_sample*units+ix_unit]);
+            uint8_t a_key = fp32_to_fp8_e5m2(weights[ix_input*units+ ix_unit]);
+            uint8_t b_key = fp32_to_fp8_e5m2(grads[ix_sample*units+ix_unit]);
 
             uint32_t index = (a_key << 8) | b_key;
 
@@ -636,8 +629,8 @@ __global__ void DenseamKernel_lut_e4m3(
         output[ix] = T(0);
         for (int ix_input = 0; ix_input < input_width; ix_input++)
         {
-            uint8_t a_key = fp32_to_e4m3(inputs[ix_sample*input_width+ix_input]);
-            uint8_t b_key = fp32_to_e4m3(weights[ix_input*units+ix_unit]);
+            uint8_t a_key = fp32_to_fp8_e4m3(inputs[ix_sample*input_width+ix_input]);
+            uint8_t b_key = fp32_to_fp8_e4m3(weights[ix_input*units+ix_unit]);
 
             uint32_t index = (a_key << 8) | b_key;
 
@@ -673,6 +666,7 @@ void DenseamFunctor<GpuDevice, T>::operator()(
             case FloatMode::FP8HYB:
                 // use DenseamKernel_lut_e4m3 with lut for forward pass    
                 DenseamKernel_lut_e4m3<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_());
+                
                 break;
             case FloatMode::FP16:
                 // use denseamkernel_5exp with lut for both forward pass
@@ -701,6 +695,7 @@ void DenseamFunctor<GpuDevice, T>::operator()(
             case FloatMode::FP8HYB:
                 // use DenseamKernel_fp8_e4m3 without lut for forward pass
                 DenseamKernel_fp8_e4m3<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
+                //DenseamKernel_fp16<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
                 break;
             case FloatMode::FP16:
                 // use DenseamKernel_fp16 without lut for both forward pass
@@ -840,6 +835,7 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
             case FloatMode::FP8HYB:
                 // use DenseamInputKernel_fp8_e5m2 without lut for backward pass
                 DenseamInputKernel_fp8_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output);
+                //DenseamInputKernel_fp16<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output);
                 break;
             case FloatMode::FP16:
                 // use DenseamInputKernel_fp16 without lut for backward pass

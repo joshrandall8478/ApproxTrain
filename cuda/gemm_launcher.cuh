@@ -101,6 +101,7 @@ void GEMM_LAUNCHER(
                 if (forward_pass){
                     // use gemm_e4m3 without lut for forward pass
                     gemm_e4m3<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    //gemm_fp16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                 } else {
                     // use gemm_e5m2 without lut for backward pass
                     gemm_e5m2<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);

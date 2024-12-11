@@ -107,8 +107,9 @@ def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, weight_
                 mant_mul_lut=lut_file, FPMode=FPMode)(x)
     
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
+
     return model
 
-def build_resnet_cifar(input_shape, num_classes, depth, tensorflow_original=False):
+def build_resnet_cifar(input_shape, num_classes, depth, lut_file, FPMode, tensorflow_original=False):
     """Helper function to build ResNet models for CIFAR datasets."""
-    return build_resnet(input_shape, num_classes, num_layers=depth, weight_decay=1e-4, tensorflow_original=tensorflow_original)
+    return build_resnet(input_shape, num_classes, num_layers=depth, lut_file=lut_file, FPMode=FPMode, weight_decay=1e-4, tensorflow_original=tensorflow_original)

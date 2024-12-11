@@ -213,11 +213,7 @@ template __global__ void gemm_fp16<int32>(size_t m, size_t n, size_t k,
    );
 
 /* gemm non-lut fp8*/
-// clip the values to fp8 then convert it back to fp32 (truncation)
-// fp32 to e4m3 then convert back to fp32
-__device__ __forceinline__ float clip_fp8_e4m3(float a) {
-    return e4m3_to_fp32(fp32_to_e4m3(a));
-}
+
 template <typename T>
 __global__ void gemm_e4m3(size_t m, size_t n, size_t k,
    const T *a, size_t lda, const T *b, size_t ldb,
@@ -273,10 +269,7 @@ template __global__ void gemm_e4m3<int32>(size_t m, size_t n, size_t k,
    int32 *c, size_t ldc
    );
 
-// fp32 to e5m2 then convert back to fp32
-__device__ __forceinline__ float clip_fp8_e5m2(float a) {
-    return e5m2_to_fp32(fp32_to_e5m2(a));
-}
+
 template <typename T>
 __global__ void gemm_e5m2(size_t m, size_t n, size_t k,
    const T *a, size_t lda, const T *b, size_t ldb,
@@ -488,8 +481,8 @@ __global__ void gemm_e5m2(size_t m, size_t n, size_t k,
         __syncthreads();
 
         for (int j = 0; j < TILE_DIM; ++j) {
-            uint8_t a_key = fp32_to_e5m2(As[threadIdx.y][j]);
-            uint8_t b_key = fp32_to_e5m2(Bs[j][threadIdx.x]);
+            uint8_t a_key = fp32_to_fp8_e5m2(As[threadIdx.y][j]);
+            uint8_t b_key = fp32_to_fp8_e5m2(Bs[j][threadIdx.x]);
 
             // Compute the index into the LUT
             uint32_t index = ((a_key << 8) | b_key)+ 256*256;  // Concatenate a_key and b_key
@@ -549,8 +542,8 @@ __global__ void gemm_e4m3(size_t m, size_t n, size_t k,
         __syncthreads();
 
         for (int j = 0; j < TILE_DIM; ++j) {
-            uint8_t a_key = fp32_to_e4m3(As[threadIdx.y][j]);
-            uint8_t b_key = fp32_to_e4m3(Bs[j][threadIdx.x]);
+            uint8_t a_key = fp32_to_fp8_e4m3(As[threadIdx.y][j]);
+            uint8_t b_key = fp32_to_fp8_e4m3(Bs[j][threadIdx.x]);
 
             // Compute the index into the LUT
             uint32_t index = (a_key << 8) | b_key;  // Concatenate a_key and b_key

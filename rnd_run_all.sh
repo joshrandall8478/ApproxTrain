@@ -3,12 +3,11 @@
 # -------------------------------------------------------------------
 # Script: run_experiments.sh
 # Description: Automate running experiments based on a CSV configuration.
-# Author: Your Name
-# Date: YYYY-MM-DD
+# Author: Jing Gong
 # -------------------------------------------------------------------
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
+# Note: Removed 'set -e' to handle errors explicitly
+# set -e  # Commented out to handle errors explicitly
 
 # ------------------------ Configuration --------------------------
 
@@ -20,6 +19,26 @@ TEMP_CSV="experiments_temp.csv"
 
 # Path to your Python training script
 PYTHON_SCRIPT="train.py"
+
+# ------------------------ Cleanup Function --------------------------
+
+# Function to clean up and move the temp CSV on exit
+cleanup() {
+    if [[ -f "$TEMP_CSV" ]]; then
+        # Append the remaining unprocessed lines to TEMP_CSV
+        TOTAL_LINES=$(wc -l < "$CSV_FILE")
+        if [[ $CURRENT_LINE -le $TOTAL_LINES ]]; then
+            tail -n +"$CURRENT_LINE" "$CSV_FILE" >> "$TEMP_CSV"
+        fi
+        mv "$TEMP_CSV" "$CSV_FILE"
+        echo -e "\nAll experiments processed. Updated CSV saved to '$CSV_FILE'."
+    else
+        echo "No temporary CSV to save."
+    fi
+}
+
+# Trap EXIT signal to run the cleanup function
+trap cleanup EXIT
 
 # ------------------------ Functions -----------------------------
 
@@ -103,8 +122,15 @@ run_python_script() {
 
     echo "Executing: $CMD"
 
-    # Execute the Python script
+    # Execute the Python script and capture the exit status
     eval "$CMD"
+    STATUS=$?
+
+    if [[ $STATUS -ne 0 ]]; then
+        echo "Error: Python script failed with status $STATUS."
+        # Return non-zero status to the caller
+        return $STATUS
+    fi
 }
 
 # ------------------------ Main Script ----------------------------
@@ -123,12 +149,15 @@ fi
 # Remove any trailing empty lines
 sed -i '/^$/d' "$CSV_FILE"
 
-# Initialize the temporary CSV with the header
+# Read the header line
 HEADER=$(head -n 1 "$CSV_FILE")
 echo "$HEADER" > "$TEMP_CSV"
 
-# Read the CSV excluding the header using input redirection to ensure all lines are read
-tail -n +2 "$CSV_FILE" | while IFS=, read -r SEED LUT EPOCH EARLYSTOPPING ROUNDING FPMode MODEL DATASET TRAIN_TIME TEST_ACC
+# Initialize line counter
+CURRENT_LINE=2  # Start from line 2 because header is line 1
+
+# Read the CSV excluding the header using process substitution
+while IFS=, read -r SEED LUT EPOCH EARLYSTOPPING ROUNDING FPMode MODEL DATASET TRAIN_TIME TEST_ACC
 do
     # Trim whitespace from variables
     SEED=$(echo "$SEED" | xargs)
@@ -156,35 +185,48 @@ do
 
         # Run the Python script
         run_python_script "$SEED" "$LUT" "$EPOCH" "$EARLYSTOPPING" "$ROUNDING" "$FPMode" "$MODEL" "$DATASET"
+        RUN_STATUS=$?
 
-        # Determine LUT file name
-        if [[ "$LUT" == "No" || "$LUT" == "no" ]]; then
-            LUT_FILE_NAME="default"
-        else
-            LUT_FILE_NAME=$(basename "$LUT" .bin)
-        fi
-
-        # Construct the path to the JSON stats file
-        STATS_FILE=$(construct_stats_path "$MODEL" "$DATASET" "$LUT_FILE_NAME" "$FPMode" "$ROUNDING" "$EARLYSTOPPING")
-
-        # Check if the JSON stats file exists
-        if [[ -f "$STATS_FILE" ]]; then
-            echo "Found stats file: $STATS_FILE"
-
-            # Extract Test Accuracy and Avg Batch Time using inline Python
-            METRICS=$(extract_metrics "$STATS_FILE")
-            TEST_ACC_VALUE=$(echo "$METRICS" | cut -d',' -f1)
-            TRAIN_TIME_PER_BATCH=$(echo "$METRICS" | cut -d',' -f2)
-
-            echo "Train Time per Batch: $TRAIN_TIME_PER_BATCH seconds"
-            echo "Test Accuracy: $TEST_ACC_VALUE"
-
-            # Append the updated row to the temporary CSV
-            echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRAIN_TIME_PER_BATCH,$TEST_ACC_VALUE" >> "$TEMP_CSV"
-        else
-            echo "Error: Stats file '$STATS_FILE' not found. Skipping metrics recording."
+        if [[ $RUN_STATUS -ne 0 ]]; then
+            echo "Error: Python script failed with status $RUN_STATUS."
+            echo "Skipping metrics extraction and recording."
             # Append the row without updating metrics
             echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,," >> "$TEMP_CSV"
+            # Optionally, you can choose to exit or continue with the next experiment
+            # For this script, we'll continue with the next experiment
+            # Increment the line counter
+            ((CURRENT_LINE++))
+            continue
+        else
+            # Determine LUT file name
+            if [[ "$LUT" == "No" || "$LUT" == "no" ]]; then
+                LUT_FILE_NAME="default"
+            else
+                LUT_FILE_NAME=$(basename "$LUT" .bin)
+            fi
+
+            # Construct the path to the JSON stats file
+            STATS_FILE=$(construct_stats_path "$MODEL" "$DATASET" "$LUT_FILE_NAME" "$FPMode" "$ROUNDING" "$EARLYSTOPPING")
+
+            # Check if the JSON stats file exists
+            if [[ -f "$STATS_FILE" ]]; then
+                echo "Found stats file: $STATS_FILE"
+
+                # Extract Test Accuracy and Avg Batch Time using inline Python
+                METRICS=$(extract_metrics "$STATS_FILE")
+                TEST_ACC_VALUE=$(echo "$METRICS" | cut -d',' -f1)
+                TRAIN_TIME_PER_BATCH=$(echo "$METRICS" | cut -d',' -f2)
+
+                echo "Train Time per Batch: $TRAIN_TIME_PER_BATCH seconds"
+                echo "Test Accuracy: $TEST_ACC_VALUE"
+
+                # Append the updated row to the temporary CSV
+                echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRAIN_TIME_PER_BATCH,$TEST_ACC_VALUE" >> "$TEMP_CSV"
+            else
+                echo "Error: Stats file '$STATS_FILE' not found. Skipping metrics recording."
+                # Append the row without updating metrics
+                echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,," >> "$TEMP_CSV"
+            fi
         fi
     else
         echo -e "\n=== Skipping Experiment ==="
@@ -201,9 +243,10 @@ do
         # Append the existing row to the temporary CSV
         echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRAIN_TIME,$TEST_ACC" >> "$TEMP_CSV"
     fi
-done
 
-# Replace the original CSV with the updated temporary CSV
-mv "$TEMP_CSV" "$CSV_FILE"
+    # Increment the line counter
+    ((CURRENT_LINE++))
 
-echo -e "\nAll experiments processed. Updated CSV saved to '$CSV_FILE'."
+done < <(tail -n +2 "$CSV_FILE")
+
+# Note: The cleanup function will be called automatically due to the 'trap' command
