@@ -570,4 +570,164 @@ template __global__ void gemm_e4m3<int32>(size_t m, size_t n, size_t k,
     const int32 *a, size_t lda, const int32 *b, size_t ldb,
    int32 *c, size_t ldc, cudaTextureObject_t mant_lut);
    
+/* gemm fp8 kernels*/
+template <typename T>
+__global__ void gemm_foward_fp8hyb(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc) 
+{
+     T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+          if (i*TILE_DIM + threadIdx.x < k && Row < m){
+               As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+          }
+          else{
+               As[threadIdx.y][threadIdx.x] = T(0);
+          }
+     
+          if (i*TILE_DIM + threadIdx.y < k && Col < n){
+               Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+          }
+          else{
+               Bs[threadIdx.y][threadIdx.x] = T(0);
+          }
+     
+          __syncthreads();
+     
+          for (int j = 0; j < TILE_DIM; ++j) {
+               // activation and weight tensor are clipped to e4m3
+               T mul_result = clip_fp8_e4m3(As[threadIdx.y][j])*clip_fp8_e4m3(Bs[j][threadIdx.x]); 
+               // Accumulate the result
+               value = fp32_add(value, mul_result);
+          }
+     
+          __syncthreads();
+     }
+     
+     if (Row < m && Col < n) {
+          c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+
+
+template __global__ void gemm_foward_fp8hyb<float>(size_t m, size_t n, size_t k,
+    const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc);
+template __global__ void gemm_foward_fp8hyb<int32>(size_t m, size_t n, size_t k,
+    const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc);
+
+template <typename T>
+__global__ void gemm_input_grad_fp8hyb(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc)
+{
+     T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           __syncthreads();
+     
+           for (int j = 0; j < TILE_DIM; ++j) {
+               // activation are clipped to e4m3 and grad are clipped to e5m3
+               T mul_result = clip_fp8_e4m3(As[threadIdx.y][j])*clip_fp8_e5m2(Bs[j][threadIdx.x]); 
+               // Accumulate the result
+               value = fp32_add(value, mul_result);
+           }
+     
+           __syncthreads();
+     }
+     
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+template __global__ void gemm_input_grad_fp8hyb<float>(size_t m, size_t n, size_t k,
+    const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc);
+template __global__ void gemm_input_grad_fp8hyb<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+      int32 *c, size_t ldc);
+
+
+template <typename T>
+__global__ void gemm_filter_grad_fp8hyb(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc)
+{
+     T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           __syncthreads();
+     
+           for (int j = 0; j < TILE_DIM; ++j) {
+               // grad are clipped to e5m2 and filter are clipped to e4m3
+               T mul_result = clip_fp8_e5m2(As[threadIdx.y][j])*clip_fp8_e4m3(Bs[j][threadIdx.x]); 
+               // Accumulate the result
+               value = fp32_add(value, mul_result);
+           }
+     
+           __syncthreads();
+     }
+     
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+template __global__ void gemm_filter_grad_fp8hyb<float>(size_t m, size_t n, size_t k,
+    const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc);
+template __global__ void gemm_filter_grad_fp8hyb<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+      int32 *c, size_t ldc);
+     
 /* end of new implementation*/

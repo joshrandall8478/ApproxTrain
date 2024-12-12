@@ -59,5 +59,21 @@ __global__ void gemm_e5m2(size_t m, size_t n, size_t k,
    const T *a, size_t lda, const T *b, size_t ldb,
    T *c, size_t ldc, cudaTextureObject_t mant_lut
    );
+
+/* gemm fp8 kernels*/
+template <typename T>
+__global__ void gemm_foward_fp8hyb(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+
+template <typename T>
+__global__ void gemm_input_grad_fp8hyb(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+
+template <typename T>
+__global__ void gemm_filter_grad_fp8hyb(size_t m, size_t n, size_t k,
+    const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
    
 #endif
