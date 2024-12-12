@@ -46,7 +46,8 @@ void GEMM_LAUNCHER(
     dim3 gridSize,
     approx_mul_lut<GPUDevice>& mul_lut,
     FloatMode mode,
-    bool forward_pass
+    bool forward_pass,
+    bool input_grad
 ){
 
     // //print floatmode
@@ -66,9 +67,14 @@ void GEMM_LAUNCHER(
             case FloatMode::FP8HYB:
                 if (forward_pass){
                     // use gemm_e4m3 with lut for forward pass
+                    std::cerr << "Not implemented" << std::endl;
+                    return;
                     gemm_e4m3<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_());
                 } else {
                     // use gemm_e5m2 with lut for backward pass
+                    // exit and say not implemented
+                    std::cerr << "Not implemented" << std::endl;
+                    return;
                     gemm_e5m2<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_());
                 }
                 break;
@@ -99,12 +105,15 @@ void GEMM_LAUNCHER(
                 break;
             case FloatMode::FP8HYB:
                 if (forward_pass){
-                    // use gemm_e4m3 without lut for forward pass
-                    gemm_e4m3<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                    //gemm_fp16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    // e4m3 clipping for activations and filter
+                    gemm_foward_fp8hyb<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                 } else {
-                    // use gemm_e5m2 without lut for backward pass
-                    gemm_e5m2<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    // e5m2 clipping for gradients and e4m3 clipping for activations and filter
+                    if (input_grad){
+                        gemm_input_grad_fp8hyb<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    } else {
+                        gemm_filter_grad_fp8hyb<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    }
                 }
                 break;
             case FloatMode::FP16:
