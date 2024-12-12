@@ -6,35 +6,206 @@
 #include <bitset>
 #include <cstdint>
 #include "fp8_conversion.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <cstdlib>
+#include <string>
+#include <sstream>
+#include <iomanip>
+#include <tuple>
+
+#include <cuda_fp16.h>
+
+void printFloatBinaryWithSpaces(float value, const std::string& label) {
+    union {
+        float f;
+        uint32_t u;
+    } fb;
+    fb.f = value;
+
+    std::string bits = std::bitset<32>(fb.u).to_string();
+    std::string sign_bit = bits.substr(0, 1);
+    std::string exponent_bits = bits.substr(1, 8);
+    std::string mantissa_bits = bits.substr(9);
+
+    std::cout << label << " binary: " << sign_bit << " " << exponent_bits << " " << mantissa_bits << std::endl;
+}
 //main function, generate random float values, convert them to e4m3 and back to float and compare new fp32_e4m3 with fp32_e4m3_old
 int main() {
     // Initialize random number generator for normal distribution (mean=0, stddev=1)
     std::mt19937 rng;
     // fix random seed for reproducibility using rng.seed(0)
     rng.seed(0);
-    std::normal_distribution<float> dist(0.0f, 1.0f);
+    std::uniform_real_distribution<float> dist(-2.0f, 2.0f);
+    std::vector<float> edge_cases = {
+        0.0f,                                // Zero
+        -0.0f,                               // Negative zero
+        std::numeric_limits<float>::denorm_min(),   // Smallest positive subnormal
+        -std::numeric_limits<float>::denorm_min(),  // Smallest negative subnormal
+        std::numeric_limits<float>::min(),   // Min positive normal
+        -std::numeric_limits<float>::min(),  // Min negative normal
+        std::numeric_limits<float>::max(),   // Max positive normal
+        -std::numeric_limits<float>::max(),  // Max negative normal
+        std::numeric_limits<float>::infinity(),      // Positive infinity
+        -std::numeric_limits<float>::infinity(),     // Negative infinity
+        std::numeric_limits<float>::quiet_NaN(),     // NaN
+        0.015625f,                          // Min positive normal for e5m2
+        -0.015625f,                         // Min negative normal for e5m2
+        57344.0f,                           // Max positive normal for e5m2
+        -57344.0f,                          // Max negative normal for e5m2
+        0.0078125f,                         // Smallest positive subnormal for e5m2
+        -0.0078125f,                        // Smallest negative subnormal for e5m2
+        1.0f,                               // Value around exponent boundary
+        -1.0f,                              // Negative value around exponent boundary
+        1.5f,                               // Value requiring rounding
+        -1.5f                               // Negative value requiring rounding
+    };
+    // get size of edge_cases
+    int edge_cases_size = edge_cases.size();
     #define TESTNUM 1000
     // Initialize matrices with random values
-    std::vector<float> matA(TESTNUM);
-    std::vector<float> matA_e5m2(TESTNUM);
+    std::vector<float> matA(TESTNUM+edge_cases_size);
+    std::vector<float> matA_e5m2(TESTNUM+edge_cases_size);
+    std::vector<float> matA_e5m2_rtz(TESTNUM+edge_cases_size);
+    std::vector<float> matA_e5m2_torch(TESTNUM+edge_cases_size);
     for (int i = 0; i < TESTNUM; ++i) {
         matA[i] = dist(rng);
-        matA_e5m2[i] = clip_fp8_e5m2(matA[i],24);
+        matA_e5m2[i] = clip_fp8_e5m2(matA[i],15);
+        matA_e5m2_rtz[i] = clip_fp8_e5m2_rtz(matA[i]);
     }
+    // append edge cases to the end of the matrices matA
+    for (int i = 0; i < edge_cases_size; ++i) {
+        matA[TESTNUM+i] = edge_cases[i];
+        matA_e5m2[TESTNUM+i] = clip_fp8_e5m2(edge_cases[i],15);
+        matA_e5m2_rtz[TESTNUM+i] = clip_fp8_e5m2_rtz(edge_cases[i]);
+        matA_e5m2_torch[TESTNUM+i] = clip_fp8_e5m2_torch(edge_cases[i]);
+    }
+    // test edge cases here
+
+    // a list to record the difference between matA_e5m2 and matA_e5m2_rtz
+    std::vector<float> diff(TESTNUM+edge_cases_size);
     // compare matA_fp32 with matA
-    for (int i = 0; i < TESTNUM; ++i) {
+    for (int i = 0; i < TESTNUM+edge_cases_size; ++i) {
         // print matA, matA_e4m3_old, matA_e4m3_new
-        std::cout << "matA[" << i << "]: " << matA[i] << std::endl;
-        std::cout << "matA_e5m2[" << i << "]: " << matA_e5m2[i] << std::endl;
+        std::cout << "matA[" << i << "]:          " << matA[i] << std::endl;
+        std::cout << "matA_e5m2[" << i << "]:     " << matA_e5m2[i] << std::endl;
+        std::cout << "matA_e5m2_rtz[" << i << "]: " << matA_e5m2_rtz[i] << std::endl;
+        std::cout << "matA_e5m2_torch[" << i << "]: " << matA_e5m2_torch[i] << std::endl;
+        // try to calculate the absolute relative difference between matA_e5m2 and matA_e5m2_rtz, if not possible catch the exception
+        try {
+            diff[i] = std::abs((matA_e5m2[i] - matA_e5m2_rtz[i]) / matA_e5m2[i]);
+        } catch (std::exception& e) {
+            std::cerr << "Exception:                    " << e.what() << std::endl;
+        }
+        // print the absolute relative difference
+        std::cout << "Relative difference:              " << diff[i] << std::endl;
+
+        
         // print binary representation of matA, matA_e4m3_old, matA_e4m3_new
         Float32Bits fb;
         fb.f = matA[i];
-        std::cout << "matA[" << i << "] binary: " << std::bitset<32>(fb.u) << std::endl;
+        std::cout << "matA[" << i << "]          binary: " << std::bitset<32>(fb.u) << std::endl;
         fb.f = matA_e5m2[i];
-        std::cout << "matA_e4m3_old[" << i << "] binary: " << std::bitset<32>(fb.u) << std::endl;
+        std::cout << "matA_e5m2[" << i << "]     binary: " << std::bitset<32>(fb.u) << std::endl;
+        fb.f = matA_e5m2_rtz[i];
+        std::cout << "matA_e5m2_rtz[" << i << "] binary: " << std::bitset<32>(fb.u) << std::endl;
+        fb.f = matA_e5m2_torch[i];
+        std::cout << "matA_e5m2_torch[" << i << "] binary: " << std::bitset<32>(fb.u) << std::endl;
         // print space
         std::cout << std::endl;
     }
+    // get the maximum relative difference and print it
+    float max_diff = *std::max_element(diff.begin(), diff.end());
+    // print its relavent matA_e5m2 and matA_e5m2_rtz
+    std::cout << "Max relative difference: " << max_diff << std::endl;
+    std::cout << "Max relative difference matA_e5m2: " << matA_e5m2[std::distance(diff.begin(), std::max_element(diff.begin(), diff.end()))] << std::endl;
+    std::cout << "Max relative difference matA_e5m2_rtz: " << matA_e5m2_rtz[std::distance(diff.begin(), std::max_element(diff.begin(), diff.end()))] << std::endl;
+    std::cout << "Max relative difference matA_e5m2_torch: " << matA_e5m2_torch[std::distance(diff.begin(), std::max_element(diff.begin(), diff.end()))] << std::endl;
+    // print their binary representation
+    Float32Bits fb;
+    fb.f = matA[std::distance(diff.begin(), std::max_element(diff.begin(), diff.end()))];
+    std::cout << "Max relative difference matA binary: " << std::bitset<32>(fb.u) << std::endl;
+    fb.f = matA_e5m2[std::distance(diff.begin(), std::max_element(diff.begin(), diff.end()))];
+    std::cout << "Max relative difference matA_e5m2 binary: " << std::bitset<32>(fb.u) << std::endl;
+    fb.f = matA_e5m2_rtz[std::distance(diff.begin(), std::max_element(diff.begin(), diff.end()))];
+    std::cout << "Max relative difference matA_e5m2_rtz binary: " << std::bitset<32>(fb.u) << std::endl;
+    fb.f = matA_e5m2_torch[std::distance(diff.begin(), std::max_element(diff.begin(), diff.end()))];
+    std::cout << "Max relative difference matA_e5m2_torch binary: " << std::bitset<32>(fb.u) << std::endl;
+
+    // get all the relative differences that are greater than 0.0 and their corresponding matA, matA_e5m2 and matA_e5m2_rtz
+    std::vector<float> diff_greater_than_zero;
+    std::vector<float> matA_diff_greater_than_zero;
+    std::vector<float> matA_e5m2_diff_greater_than_zero;
+    std::vector<float> matA_e5m2_rtz_diff_greater_than_zero;
+    std::vector<float> matA_e5m2_torch_diff_greater_than_zero;
+    for (int i = 0; i < TESTNUM+edge_cases_size; ++i) {
+        if (diff[i] > 0.0) {
+            diff_greater_than_zero.push_back(diff[i]);
+            matA_diff_greater_than_zero.push_back(matA[i]);
+            matA_e5m2_diff_greater_than_zero.push_back(matA_e5m2[i]);
+            matA_e5m2_rtz_diff_greater_than_zero.push_back(matA_e5m2_rtz[i]);
+            matA_e5m2_torch_diff_greater_than_zero.push_back(matA_e5m2_torch[i]);
+        }
+    }
+    // sort the relative differences that are greater than 0.0 and keep their corresponding matA, matA_e5m2 and matA_e5m2_rtz in the same order
+    std::vector<float> diff_greater_than_zero_sorted = diff_greater_than_zero;
+    std::vector<float> matA_diff_greater_than_zero_sorted = matA_diff_greater_than_zero;
+    std::vector<float> matA_e5m2_diff_greater_than_zero_sorted = matA_e5m2_diff_greater_than_zero;
+    std::vector<float> matA_e5m2_rtz_diff_greater_than_zero_sorted = matA_e5m2_rtz_diff_greater_than_zero;
+    std::vector<float> matA_e5m2_torch_diff_greater_than_zero_sorted = matA_e5m2_torch_diff_greater_than_zero;
+
+    // Combine the vectors into a vector of tuples
+std::vector<std::tuple<float, float, float, float, float>> combined;
+for (size_t i = 0; i < diff_greater_than_zero.size(); ++i) {
+    combined.emplace_back(
+        diff_greater_than_zero[i],
+        matA_diff_greater_than_zero[i],
+        matA_e5m2_diff_greater_than_zero[i],
+        matA_e5m2_rtz_diff_greater_than_zero[i],
+        matA_e5m2_torch_diff_greater_than_zero[i]);
+
+}
+
+// Sort the combined vector based on diff_greater_than_zero
+std::sort(combined.begin(), combined.end(),
+    [](const std::tuple<float, float, float, float, float>& a,
+       const std::tuple<float, float, float, float, float>& b) {
+        return std::get<0>(a) < std::get<0>(b);
+    });
+
+// Unpack the sorted tuples back into the sorted vectors
+for (size_t i = 0; i < combined.size(); ++i) {
+    diff_greater_than_zero_sorted[i] = std::get<0>(combined[i]);
+    matA_diff_greater_than_zero_sorted[i] = std::get<1>(combined[i]);
+    matA_e5m2_diff_greater_than_zero_sorted[i] = std::get<2>(combined[i]);
+    matA_e5m2_rtz_diff_greater_than_zero_sorted[i] = std::get<3>(combined[i]);
+    matA_e5m2_torch_diff_greater_than_zero_sorted[i] = std::get<4>(combined[i]);
+}
+    // print separator
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+
+// print the sorted relative differences that are greater than 0.0 and their corresponding matA, matA_e5m2 and matA_e5m2_rtz
+for (int i = 0; i < diff_greater_than_zero_sorted.size(); ++i) {
+    std::cout << "Relative difference:              " << diff_greater_than_zero_sorted[i] << std::endl;
+    std::cout << "matA[" << i << "]:            " << matA_diff_greater_than_zero_sorted[i] << std::endl;
+    std::cout << "matA_e5m2[" << i << "]:       " << matA_e5m2_diff_greater_than_zero_sorted[i] << std::endl;
+    std::cout << "matA_e5m2_rtz[" << i << "]:   " << matA_e5m2_rtz_diff_greater_than_zero_sorted[i] << std::endl;
+    // std::cout << "matA_e5m2_torch[" << i << "]: " << matA_e5m2_torch_diff_greater_than_zero_sorted[i] << std::endl;
+    // print binary representation of matA, matA_e4m3_old, matA_e4m3_new
+    std::string label = "matA[" + std::to_string(i) + "]            binary: ";
+    printFloatBinaryWithSpaces(matA_diff_greater_than_zero_sorted[i], label);
+    label =             "matA_e5m2[" + std::to_string(i) + "]       binary: ";
+    printFloatBinaryWithSpaces(matA_e5m2_diff_greater_than_zero_sorted[i], label);
+    label =             "matA_e5m2_rtz[" + std::to_string(i) + "]   binary: ";
+    printFloatBinaryWithSpaces(matA_e5m2_rtz_diff_greater_than_zero_sorted[i], label);
+    // label =             "matA_e5m2_torch[" + std::to_string(i) + "] binary: ";
+    // printFloatBinaryWithSpaces(matA_e5m2_torch_diff_greater_than_zero_sorted[i], label);
+}
     std::cerr << "Conversion successful." << std::endl;
     return EXIT_SUCCESS;
 }

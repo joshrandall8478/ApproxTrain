@@ -7,6 +7,7 @@
 #include <fstream>
 #include <bitset>
 #include <cstdint>
+#include <cuda_fp16.h>
 union Float32Bits {
     float f;
     uint32_t u;
@@ -22,6 +23,94 @@ float fp32_from_bits(uint32_t u) {
     Float32Bits fb;
     fb.u = u;
     return fb.f;
+}
+uint8_t fp8e5m2_from_fp32_value_torch(float f) {
+  /*
+   * Binary representation of fp32 infinity
+   * 0 11111111 00000000000000000000000
+   */
+  constexpr uint32_t fp32_inf = UINT32_C(255) << 23;
+
+  /*
+   * Binary representation of 65536.0f, which is the first value
+   * not representable in fp8e5m2 range:
+   * 0 11111 00 - fp8e5m2
+   * 0 10001111 00000000000000000000000 - fp32
+   */
+  constexpr uint32_t fp8_max = UINT32_C(143) << 23;
+
+  /*
+   * A mask for converting fp32 numbers lower than fp8e5m2 normal range
+   * into denorm representation
+   * magic number: ((127 - 15) + (23 - 2) + 1)
+   */
+  constexpr uint32_t denorm_mask = UINT32_C(134) << 23;
+
+  uint32_t f_bits = fp32_to_bits(f);
+  uint8_t result = 0u;
+
+  /*
+   * Extract the sign of the input number into the high bit of the 32-bit word:
+   *
+   *      +---+----------------------------------+
+   *      | S |0000000 00000000 00000000 00000000|
+   *      +---+----------------------------------+
+   * Bits  31                 0-31
+   */
+  const uint32_t sign = f_bits & UINT32_C(0x80000000);
+
+  /*
+   * Set sign bit to 0
+   */
+  f_bits ^= sign;
+
+  if (f_bits >= fp8_max) {
+    // NaN - all exponent and mantissa bits set to 1
+    result = f_bits > fp32_inf ? UINT8_C(0x7F) : UINT8_C(0x7C);
+  } else {
+    if (f_bits < (UINT32_C(113) << 23)) {
+      // Input number is smaller than 2^(-14), which is the smallest
+      // fp8e5m2 normal number
+      f_bits =
+          fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
+      result = static_cast<uint8_t>(f_bits - denorm_mask);
+    } else {
+      // resulting mantissa is odd
+      uint32_t mant_odd = (f_bits >> 21) & 1;
+
+      // update exponent, rounding bias part 1
+      f_bits += ((uint32_t)(15 - 127) << 23) + 0xFFFFF;
+
+      // rounding bias part 2
+      f_bits += mant_odd;
+
+      // take the bits!
+      result = static_cast<uint8_t>(f_bits >> 21);
+    }
+  }
+
+  result |= static_cast<uint8_t>(sign >> 24);
+  return result;
+}
+float fp8e5m2_to_fp32_value_torch(uint8_t input) {
+  /*
+   * Extend the fp8 E5M2 number to 32 bits and shift to the
+   * upper part of the 32-bit word:
+   *      +---+----+---+-----------------------------+
+   *      | S |EEEEE|MM|0000 0000 0000 0000 0000 0000|
+   *      +---+----+---+-----------------------------+
+   * Bits  31 26-30 24-25          0-23
+   *
+   * S - sign bit, E - bits of the biased exponent, M - bits of the mantissa, 0
+   * - zero bits.
+   */
+  uint16_t half_representation = input;
+  half_representation <<= 8;
+  return __half2float(*reinterpret_cast<__half*>(&half_representation));
+}
+
+float clip_fp8_e5m2_torch(float a){
+    return fp8e5m2_to_fp32_value_torch(fp8e5m2_from_fp32_value_torch(a));
 }
 // Convert from fp32 to fp8 e5m2 with variable bias
 // Clamps large values to max normal, flushes very small values to zero
@@ -127,6 +216,20 @@ uint8_t fp32_to_fp8_e5m2(float a, int fp8_bias) {
     // Rounding up if the next bit after truncated bits is set
     if (mant & mant_round_bit) {
         mant_fp8++;
+        if (mant_fp8 == 4) {
+            // Overflow in mantissa
+            mant_fp8 = 0;
+            exp++;
+            // overflow in exp
+            // Handle very large exponent (overflow)
+            if (exp >= (FP8_EXP_MAX - 1)) {
+                // Clamp to max normal
+                return (uint8_t)(sign | MAX_NORMAL_FP8);
+            }
+        }
+
+    
+
     }
     mant_fp8 &= 0x03; // 2-bit mantissa
 
@@ -216,8 +319,8 @@ float fp8_e5m2_to_fp32(uint8_t h, int fp8_bias) {
 }
 float clip_fp8_e5m2(float a, int fp8_bias=24) {
     // Direct round-trip:
-    uint8_t h = fp32_to_fp8_e5m2(a, 24);
-    return fp8_e5m2_to_fp32(h, 24);
+    uint8_t h = fp32_to_fp8_e5m2(a, fp8_bias);
+    return fp8_e5m2_to_fp32(h, fp8_bias);
 }
 // Convert fp32 to fp8 e4m3 with variable bias
 uint8_t fp32_to_fp8_e4m3(float a, int fp8_bias) {
@@ -361,5 +464,19 @@ float fp8_e4m3_to_fp32(uint8_t h, int fp8_bias) {
 float clip_fp8_e4m3(float a, int fp8_bias=14) {
     uint8_t h = fp32_to_fp8_e4m3(a, fp8_bias);
     return fp8_e4m3_to_fp32(h, fp8_bias);
+}
+
+
+float clip_fp8_e5m2_rtz(float a) {
+    // convert to half
+    __half b = __float2half(a);
+    // as uint
+    uint16_t h_bits = *reinterpret_cast<uint16_t*>(&b);
+    // convert to fp8 e5m2
+    h_bits = h_bits & 0xff00;
+    // convert back to half
+    b = *reinterpret_cast<__half*>(&h_bits);
+    // convert back to float
+    return __half2float(b);
 }
 #endif // FP8_CONVERSION_H
