@@ -168,41 +168,41 @@ uint8_t fp32_to_fp8_e5m2(float a, int fp8_bias) {
     // Handle subnormals and underflow
     // For exponent <= 0, we may have subnormals
     if (exp <= 0) {
-        // For subnormal in e5m2:
-        // value = sign * mantissa/(2^m) * 2^(1 - bias) 
-        // If exp < - (2+1) [some margin], flush to zero.
-        // The smallest exponent for normal is 1 - fp8_bias.
-        // If we are too small, just return zero.
-        if (exp < -((1 << FP8_MANT_BITS))) {
-            return (uint8_t)sign; // Underflow to zero
+        if (exp < -1) {
+            // The value is too small even for subnormal.
+            // Flush to zero, preserving sign.
+            return (uint8_t)sign;
         }
 
-        // Prepare for subnormal: 
-        // Add implicit leading 1 to mantissa if originally was a normal fp32 number
-        mant |= 0x00800000u; 
-        // Shift mantissa to fit into 2 bits after adjusting for subnormal scale
-        // Each decrement in exp below 1 means dividing by 2.
-        int shift = 23 - FP8_MANT_BITS + (1 - exp); 
-        // (1 - exp) is how many extra powers of two we need to shift by.
-        // exp ≤ 0, so (1 - exp) ≥ 1
-        // Example: if exp = 0 => shift = 23 - 2 + 1 = 22 bits
-        // If exp = -1 => shift = 23 - 2 + 2 = 23 bits, etc.
+        // If the original FP32 number was normal (biased_exp != 0), add the implicit leading 1.
+        if (biased_exp != 0) {
+            mant |= 0x00800000u;
+        } 
+        // If biased_exp == 0 (FP32 subnormal), we do not add the implicit 1.
 
-        // Avoid negative shifts just in case, but we already handled that by checking exp.
-        if (shift > 31) shift = 31; // safety
-        uint32_t mant_fp8 = mant >> shift;
+   
+        int shift = 22 - exp; // shift to get the mantissa
+        // if (shift > 31) shift = 31; // clamp shift to avoid overshifting
 
-        // Rounding: check next bit for rounding up
-        // If the bit just below the cut is set, round up
-        // This is a simple round half up strategy.
-        if (shift > 0 && (mant & (1u << (shift-1)))) {
+        uint32_t val = mant;
+        uint32_t mant_fp8 = val >> shift;
+
+        // Rounding half-up: check the bit below the truncated bits
+        if (val & (1u << (shift - 1))) {
             mant_fp8++;
+            if (mant_fp8 == 4) {
+                return (uint8_t)(sign | 0x4);
+            }
         }
 
-        // Mask mantissa
-        mant_fp8 &= 0x03;
+   
 
-        // For subnormals in FP8, exponent = 0
+        // If rounding results in zero, the value is too small
+        if (mant_fp8 == 0) {
+            return (uint8_t)sign;
+        }
+
+        // Construct subnormal fp8 value (exponent=0)
         uint8_t fp8 = (uint8_t)(sign | mant_fp8);
         return fp8;
     }
@@ -274,30 +274,24 @@ float fp8_e5m2_to_fp32(uint8_t h, int fp8_bias) {
             out_exp = 0; 
             out_mant = 0;
         } else {
-            // subnormal
-            // value = (-1)^sign * (mantissa/(2^m)) * 2^(1 - bias)
-            // in fp32: out_exp = 127 + (1 - fp8_bias) - 1 (for subnormal no leading 1)
-            // Actually: smallest normal exponent = 1 - bias
-            // subnormal exponent in fp32 = (1 - bias) - 1 = -bias
-            // So out_exp = FP32_BIAS + ((1 - FP8_BIAS) - 1) = FP32_BIAS - FP8_BIAS
-            // Actually simpler: 
-            // For subnormals: exponent in linear form = 1 - FP8_BIAS
-            // out_exp = 127 + (1 - FP8_BIAS)
-            int32_t e = 1 - fp8_bias; 
-            out_exp = 127 + e; 
-            // fraction = mantissa / (2^2) * 2^(e)
-            // to build mantissa in fp32: (fraction = mantissa/(4)) * 2^e
-            // We'll construct out_mant accordingly:
-            // fraction * 2^(out_exp-127) = mantissa/(4)
-            // mantissa/(4) means shift mantissa up by (23 - 2) bits for fp32
-            // but we have no leading 1, so just place mantissa in mant bits:
-            uint32_t frac = mantissa; 
-            // place mantissa in 23-bit fraction field: frac * 2^(23-2)=frac<<21
-            out_mant = frac << (23 - FP8_MANT_BITS);
-            // no leading 1 in subnormals, so no extra addition
-            // might need to adjust exponent if resulting fraction < 1.0
-            // Actually subnormal: fraction = mantissa/(4)
-            // So final: sign + out_exp + out_mant good.
+        // Subnormal
+        // Start with the exponent for subnormals in FP8
+        int32_t e = 1 - fp8_bias; // Exponent for subnormal FP8
+        out_exp = 127 + e; // Map FP8 exponent to FP32 range
+
+        // Normalise the mantissa by finding the leading 1 position
+        uint32_t frac = mantissa;
+        int shift = 0;
+        while ((frac & 0x4) == 0) { // Keep shifting until the MSB is aligned
+            frac <<= 1;
+            shift++;
+        }
+
+        // Adjust the exponent based on the number of shifts
+        out_exp -= shift;
+
+        // Place the mantissa in the FP32 fraction field
+        out_mant = (frac & 0x3) << (23 - FP8_MANT_BITS);
         }
     } else {
         // Normal number
@@ -476,6 +470,13 @@ float clip_fp8_e5m2_rtz(float a) {
     h_bits = h_bits & 0xff00;
     // convert back to half
     b = *reinterpret_cast<__half*>(&h_bits);
+    // convert back to float
+    return __half2float(b);
+}
+
+float clip_fp16(float a){
+    // convert to half
+    __half b = __float2half(a);
     // convert back to float
     return __half2float(b);
 }
