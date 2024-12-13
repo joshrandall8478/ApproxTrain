@@ -86,7 +86,7 @@ int main() {
         std::cout << "matA_fp16[" << i << "]:     " << matA_fp16[i] << std::endl;
         // try to calculate the absolute relative difference between matA_e5m2 and matA_e5m2_rtz, if not possible catch the exception
         try {
-            diff[i] = std::abs((matA_e4m3[i] - matA_e5m2[i]) / matA_e5m2[i]);
+            diff[i] = std::abs((matA_e5m2[i] - matA_e5m2_rtz[i]) / matA_e5m2_rtz[i]);
         } catch (std::exception& e) {
             std::cerr << "Exception:                    " << e.what() << std::endl;
         }
