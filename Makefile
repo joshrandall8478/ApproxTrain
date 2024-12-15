@@ -18,15 +18,15 @@ MATMUL_OBJ = matmulam.o
 
 CUDA_ROOT = /usr/local/cuda
 CUDA_LIB ?= $(CUDA_ROOT)/lib64
-CONV_CUDA_OBJ = cuda_kernel.cu.o  gemm.cu.o reverseNswapdim23.cu.o approx_mul_lut.cu.o 
+CONV_CUDA_OBJ = cuda_kernel.cu.o  gemm.cu.o reverseNswapdim23.cu.o approx_mul_lut.cu.o quant.cu.o
 NVCC ?= nvcc
 CUDA_ARCH = -gencode arch=compute_61,code=sm_61  # Set to sm_61 for GTX 1080
 CUDA_CFLAGS += -g  -O2 -std=c++11 $(CUDA_ARCH) -Xcompiler -Wall -Xcompiler -fPIC  -Xcudafe --diag_suppress=esa_on_defaulted_function_ignored --expt-relaxed-constexpr
 CUDA_LDFLAGS = -L$(CUDA_LIB) -lcudart
 CONV_OBJ += $(CONV_CUDA_OBJ)
-DENSE_CUDA_OBJ = denseam_kernel.cu.o approx_mul_lut.cu.o
+DENSE_CUDA_OBJ = denseam_kernel.cu.o approx_mul_lut.cu.o quant.cu.o
 DENSE_OBJ += $(DENSE_CUDA_OBJ)
-MATMUL_CUDA_OBJ = matmulam_kernel.cu.o gemm.cu.o approx_mul_lut.cu.o 
+MATMUL_CUDA_OBJ = matmulam_kernel.cu.o gemm.cu.o approx_mul_lut.cu.o quant.cu.o
 MATMUL_OBJ += $(MATMUL_CUDA_OBJ)
 
 
@@ -71,11 +71,13 @@ denseam.o: denseam.cc denseam.h
 mul_inc_deps = cuda/AMsimulator.inl 
 
 # cuda stuff
-denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) cuda/fp8_conversion.cuh 
-	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS)  $(ADD_ROUNDING_CPPFLAG)   -c $< -o $@
-matmulam_kernel.cu.o: cuda/matmulam_kernel.cu cuda/error.cuh cuda/gemm.cuh 
+quant.cu.o: cuda/quant.cu cuda/error.cuh cuda/fp8_conversion.cuh 
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@
-cuda_kernel.cu.o: cuda/cuda_kernel.cu cuda/gpu_kernel_helper.h cuda/error.cuh cuda/gemm.cuh cuda/reverseNswapdim23.cuh cuda/gemm_launcher.cuh
+denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) cuda/fp8_conversion.cuh cuda/quant.cuh
+	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS)  $(ADD_ROUNDING_CPPFLAG)   -c $< -o $@
+matmulam_kernel.cu.o: cuda/matmulam_kernel.cu cuda/error.cuh cuda/gemm.cuh cuda/quant.cuh
+	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@
+cuda_kernel.cu.o: cuda/cuda_kernel.cu cuda/gpu_kernel_helper.h cuda/error.cuh cuda/gemm.cuh cuda/reverseNswapdim23.cuh cuda/gemm_launcher.cuh cuda/quant.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) --expt-relaxed-constexpr -c $< -o $@
 
 gemm.cu.o: cuda/gemm.cu $(mul_inc_deps) cuda/fp8_conversion.cuh

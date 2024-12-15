@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <iterator>
 #include "gemm_launcher.cuh"
+#include "quant.cuh"    
 // #include "floatmode.h"
 
 using namespace tensorflow;
@@ -119,9 +120,29 @@ void ConvamKernelLauncher(
     const int padding,
     T* output,
     approx_mul_lut<GPUDevice>& mul_lut,
-    FloatMode mode
+    FloatMode mode,
+    T* quant_input,
+    T* quant_filter
   ){
-
+    T* input_data = const_cast<T*>(inputs);
+    T* filter_data = const_cast<T*>(filter);
+    if (mode == FloatMode::FP8HYB || mode == FloatMode::FP8E5M2) {
+        int quant_input_size = batch * in_row * in_col * in_depth;
+        int quant_filter_size = out_depth * in_depth * filter_row * filter_col;
+        if (mode == FloatMode::FP8HYB) {
+            // if mode is fp8hyb, we need to quantize the input and filter using e4m3
+            // get size of input and filter
+            quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, quant_input_size);
+            quant_fp32_e4m3clipping_launcher<T>(d, filter, quant_filter, quant_filter_size);
+        } else if (mode == FloatMode::FP8E5M2) {
+            // if mode is fp8e5m2, we need to quantize the input and filter using e5m2
+            quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, quant_input_size);
+            quant_fp32_e5m2clipping_launcher<T>(d, filter, quant_filter, quant_filter_size);
+        }
+        input_data = quant_input;
+        filter_data = quant_filter;
+    } 
+        
     if (filter_row == 1 && filter_col == 1 && stride_row == 1 &&
         stride_col == 1) {
         // The kernel is 1x1.
@@ -134,7 +155,7 @@ void ConvamKernelLauncher(
         //const int size = m*n;
         dim3 blockSize(16, 16, 1);
         dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-        GEMM_LAUNCHER<T>(d, m, n, k, inputs, lda, filter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false);
+        GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false);
         return;
     } else if (filter_row == in_row && filter_col== in_col &&
                padding == 1) {
@@ -148,12 +169,12 @@ void ConvamKernelLauncher(
          //const int size = m*n;
          dim3 blockSize(16, 16, 1);
          dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-         GEMM_LAUNCHER<T>(d, m, n, k, inputs, lda, filter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false);
+         GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false);
          gpuErrchk( cudaPeekAtLastError() );
          gpuErrchk( cudaDeviceSynchronize() );
          return;
     }
-    im2colLauncher<T>(d,inputs, batch, in_row, in_col, out_row, out_col,out_depth, in_depth, filter_row, filter_col, stride_row, stride_col, left_offset,top_offset, 1,1 ,im2col);
+    im2colLauncher<T>(d,input_data, batch, in_row, in_col, out_row, out_col,out_depth, in_depth, filter_row, filter_col, stride_row, stride_col, left_offset,top_offset, 1,1 ,im2col);
     const size_t m = batch*out_row*out_col;
     const size_t n = out_depth;
     const size_t k = filter_col * filter_row * in_depth;
@@ -162,7 +183,7 @@ void ConvamKernelLauncher(
     const size_t ldc = out_depth;
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, filter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false);
 
 }
 
@@ -178,9 +199,10 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
         const int filter_left_offset, const int filter_top_offset,
         const int filter_rows, const int filter_cols, const int in_depth,
         const int input_cols, const int input_rows, const T* filter,
-        T* im2col, const int padding, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode
+        T* im2col, const int padding, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
+        T* quant_input, T* quant_filter
         ) {
-    // this is a very primitive tiling function. I mean VERY.
+    // this is a very primitive tiling function
     //TODO Simplify the cases
     int const oneinputsize = input_rows * input_cols * in_depth;
     int const oneoutputsize = out_rows* out_cols * out_depth;
@@ -209,7 +231,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data,
                     mul_lut,
-                    mode
+                    mode,
+                    quant_input,
+                    quant_filter
                     );
         } else {
             loop1Da(i, batch, max_batch) {
@@ -234,7 +258,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data + i * oneoutputsize,
                     mul_lut,
-                    mode
+                    mode,
+                    quant_input + i * oneinputsize,
+                    quant_filter
                     );
             }
         }
@@ -259,7 +285,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data,
                     mul_lut,
-                    mode
+                    mode,
+                    quant_input,
+                    quant_filter
                     );
     } else {
         size_t const block_size = 16;
@@ -285,7 +313,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data,
                     mul_lut,
-                    mode
+                    mode,
+                    quant_input,
+                    quant_filter
                     );
         } else {
             loop1Da(i, batch, max_batch){
@@ -310,7 +340,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     padding,
                     output_data + i * oneoutputsize,
                     mul_lut,
-                    mode
+                    mode,
+                    quant_input + i * oneinputsize,
+                    quant_filter
                     );
             }
         }
@@ -404,10 +436,28 @@ void ConvamFilterGradKernelLauncher(
     const int filter_height,
     T* out, 
     approx_mul_lut<GPUDevice>& mul_lut,
-    FloatMode mode
+    FloatMode mode,
+    T* quant_input,
+    T* quant_grad
 ){
-
-    im2colLauncher_filtergrad<T>(d,input,batch,input_height,input_width,grad_height,grad_width,grad_channel,in_depth,filter_height,filter_width,stride_row,stride_col,\
+    T* input_data = const_cast<T*>(input);
+    T* grad_data = const_cast<T*>(grad);
+    if (mode == FloatMode::FP8HYB || mode == FloatMode::FP8E5M2) {
+        int quant_input_size = batch * input_height * input_width * in_depth;
+        int quant_grad_size = batch * grad_height * grad_width * grad_channel;
+        if (mode == FloatMode::FP8HYB) {
+            // if mode is fp8hyb, we need to quantize the input using e4m3 and the grad using e5m2
+            quant_fp32_e4m3clipping_launcher<T>(d, input, quant_input, quant_input_size);
+            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size);
+        } else if (mode == FloatMode::FP8E5M2) {
+            // if mode is fp8e5m2, we need to quantize the input and grad using e5m2
+            quant_fp32_e5m2clipping_launcher<T>(d, input, quant_input, quant_input_size);
+            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size);
+        }
+        input_data = quant_input;
+        grad_data = quant_grad;
+    }
+    im2colLauncher_filtergrad<T>(d,input_data,batch,input_height,input_width,grad_height,grad_width,grad_channel,in_depth,filter_height,filter_width,stride_row,stride_col,\
     filter_left_offset,filter_top_offset,1,1,im2col);
     const size_t m = filter_height*filter_width*in_depth;
     const size_t n = grad_channel;
@@ -417,7 +467,7 @@ void ConvamFilterGradKernelLauncher(
     const size_t ldc = n;
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad, ldb, out, ldc, blockSize, gridSize, mul_lut, mode, false, false);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad_data, ldb, out, ldc, blockSize, gridSize, mul_lut, mode, false, false);
 };
 
 template <typename T>
@@ -428,7 +478,8 @@ void ConvamFilterGradFunctor<Eigen::GpuDevice, T>::operator()(
         const int out_rows,const int out_depth, const int filter_left_offset,
         const int filter_top_offset, const int stride_rows,
         const int stride_cols, const int filter_cols, const int filter_rows,
-        T* output, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode
+        T* output, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
+        T* quant_input, T* quant_grad
         ) {
     ConvamFilterGradKernelLauncher<T>(
             d,
@@ -450,7 +501,9 @@ void ConvamFilterGradFunctor<Eigen::GpuDevice, T>::operator()(
             filter_rows,
             output,
             mul_lut,
-            mode
+            mode,
+            quant_input,
+            quant_grad
             );
 }
 template <typename T>
@@ -541,6 +594,8 @@ void ConvamInputGradKernelLauncher(
     const int filter_height,
     const int filter_width,
     const int output_channel,
+    const int out_rows,
+    const int out_cols,
     const int stride_rows,
     const int stride_cols,
     // input related
@@ -550,13 +605,31 @@ void ConvamInputGradKernelLauncher(
     const int input_channel,
     T* output,
     approx_mul_lut<GPUDevice>& mul_lut,
-    FloatMode mode
+    FloatMode mode,
+    T* quant_filter,
+    T* quant_grad
 
 ){
 
-
+    T* grad_data = const_cast<T*>(grad);
+    T* filter_data = const_cast<T*>(filter);
+    if (mode == FloatMode::FP8HYB || mode == FloatMode::FP8E5M2) {
+        int quant_grad_size = input_batch * out_rows * out_cols * output_channel;
+        int quant_filter_size = input_channel* output_channel * filter_height * filter_width;
+        if (mode == FloatMode::FP8HYB) {
+            // if mode is fp8hyb, we need to quantize the grad using e5m2 and the filter using e4m3
+            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size);
+            quant_fp32_e4m3clipping_launcher<T>(d, filter, quant_filter, quant_filter_size);
+        } else if (mode == FloatMode::FP8E5M2) {
+            // if mode is fp8e5m2, we need to quantize the grad and filter using e5m2
+            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size);
+            quant_fp32_e5m2clipping_launcher<T>(d, filter, quant_filter, quant_filter_size);
+        }
+        grad_data = quant_grad;
+        filter_data = quant_filter;
+    }
     im2colLauncher_inputgrad<T>(
-        d,grad, input_batch, hole_grad_height, hole_grad_width, input_height, input_width,input_channel,output_channel,filter_height,
+        d,grad_data, input_batch, hole_grad_height, hole_grad_width, input_height, input_width,input_channel,output_channel,filter_height,
         filter_width,stride_rows,stride_cols,back_pad_left,back_pad_top,1,1,im2col);
     const size_t m = input_batch*input_height*input_width; //4
     const size_t n = input_channel; //  1
@@ -567,7 +640,7 @@ void ConvamInputGradKernelLauncher(
     //const int size = m*n;
     dim3 block_size(32,32);
     dim3 grid_size(ceil(filter_width * filter_height/(float)32.0), ceil(output_channel/(float)32.0));
-    reverseNswapdim23<T><<<grid_size,block_size>>>(filter_height, filter_width, input_channel, output_channel, rsfilter, filter);
+    reverseNswapdim23<T><<<grid_size,block_size>>>(filter_height, filter_width, input_channel, output_channel, rsfilter, filter_data);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchk( cudaDeviceSynchronize() );
     dim3 blockSize(16, 16, 1);
@@ -584,14 +657,14 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
         const int stride_rows, const int stride_cols, const int batch,
         const int input_rows, const int input_cols, const int in_depth,
         T* output, const int out_rows, const int out_cols, 
-        approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode
+        approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
+        T* quant_filter, T* quant_grad
         ){
     // a very primitive tiling, I mean VERY
     //auto const oneinputsize = input_rows*input_cols*in_depth;
     auto const oneoutputsize = out_rows*out_cols*out_depth;
     size_t const block_size = 16;
-    size_t const max_batch = (65536*block_size + 1 - block_size)/
-        (input_rows*input_cols);
+    size_t const max_batch = (65536*block_size + 1 - block_size)/(input_rows*input_cols);
     if ((size_t)batch <= max_batch) {
 
         ConvamInputGradKernelLauncher<T>(
@@ -607,6 +680,8 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                 filter_rows,
                 filter_cols,
                 out_depth,
+                out_rows,
+                out_cols,
                 stride_rows,
                 stride_cols,
                 batch,
@@ -615,7 +690,9 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                 in_depth,
                 output,
                 mul_lut,
-                mode
+                mode,
+                quant_filter,
+                quant_grad
                 );
     } else {
         loop1Da(i, batch, max_batch){
@@ -633,6 +710,8 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                      filter_rows,
                      filter_cols,
                      out_depth,
+                     out_rows,
+                     out_cols,
                      stride_rows,
                      stride_cols,
                      ibatch,
@@ -641,7 +720,10 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                      in_depth,
                      output + i*oneoutputsize,
                      mul_lut,
-                     mode
+                     mode,
+                     quant_filter,
+                     quant_grad + i*oneoutputsize
+                     
                 );
         }
     }

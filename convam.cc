@@ -448,7 +448,7 @@ struct ConvamFunctor<CPUDevice, T> {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             const T* im2col, const int padding,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter
           ) {
 
     for (int batch_ = 0; batch_ < batch; ++batch_) {
@@ -527,6 +527,25 @@ public:
     Conv2DDimensions dimensions;
     OP_REQUIRES_OK(context,
                    ComputeConv2DDimension(params_, input, filter, &dimensions));
+
+
+    // if mode_ is FP8HYB or FP8E5M2, create quant_input and quant_filter tensors
+    Tensor quant_input;
+    Tensor quant_filter;
+    if (mode_ == FloatMode::FP8HYB || mode_ == FloatMode::FP8E5M2) {
+      // handle quant_input tensor
+      TensorShape quant_input_shape = ShapeFromFormat(
+          params_.data_format, dimensions.batch, dimensions.input_rows,
+          dimensions.input_cols, dimensions.in_depth);
+      // allocate quant_input tensor
+      OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_input_shape, &quant_input));
+      // handle quant_filter tensor
+      TensorShape quant_filter_shape = ShapeFromFormat(
+          params_.data_format, dimensions.filter_rows, dimensions.filter_cols,
+          dimensions.in_depth, dimensions.out_depth);
+      // allocate quant_filter tensor
+      OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_filter_shape, &quant_filter));
+    }
     // get output shape
     TensorShape out_shape = ShapeFromFormat(
         params_.data_format, dimensions.batch, dimensions.out_rows,
@@ -573,6 +592,9 @@ public:
     auto input_data = input.flat<T>().data();
     auto filter_data = filter.flat<T>().data();
     auto im2col_data = im2col.flat<T>().data();
+
+    auto quant_input_data = quant_input.flat<T>().data();
+    auto quant_filter_data = quant_filter.flat<T>().data();
     // Calculate filter offset
     int filter_left_offset;
     int filter_top_offset;
@@ -614,7 +636,9 @@ public:
             im2col_data,
             params_.padding,
             mul_lut_,
-            mode_
+            mode_,
+            quant_input_data,
+            quant_filter_data
             );
   }
   private:
@@ -659,7 +683,7 @@ struct ConvamFilterGradFunctor<CPUDevice, T>{
           const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
+          T* output, approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad
           ){
 
     for (int out_y = 0; out_y < filter_rows; ++out_y) {
@@ -814,6 +838,27 @@ public:
     if (filter_shape.num_elements() == 0) {
       return;
     }
+    // if mode_ is FP8HYB or FP8E5M2, create quant_input and quant_grad tensors
+    Tensor quant_input;
+    Tensor quant_grad;
+    if (mode_ == FloatMode::FP8HYB || mode_ == FloatMode::FP8E5M2) {
+      // handle quant_input tensor
+      TensorShape quant_input_shape = ShapeFromFormat(
+          data_format_, GetTensorDim(input, data_format_, 'N'),
+          GetTensorDim(input, data_format_, 'H'),
+          GetTensorDim(input, data_format_, 'W'),
+          GetTensorDim(input, data_format_, 'C'));
+      // allocate quant_input tensor
+      OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_input_shape, &quant_input));
+      // handle quant_grad tensor
+      TensorShape quant_grad_shape = ShapeFromFormat(
+          data_format_, GetTensorDim(out_backprop, data_format_, 'N'),
+          GetTensorDim(out_backprop, data_format_, 'H'),
+          GetTensorDim(out_backprop, data_format_, 'W'),
+          GetTensorDim(out_backprop, data_format_, 'C'));
+      // allocate quant_grad tensor
+      OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_grad_shape, &quant_grad));
+    }
     ConvBackpropDimensions dims;
     OP_REQUIRES_OK(context,
                    ConvBackpropComputeDimensions(
@@ -886,6 +931,8 @@ public:
     auto in_data = input.flat<T>().data();
     auto out = filter_backprop->template flat<T>().data();
 
+    auto quant_input_data = quant_input.flat<T>().data();
+    auto quant_grad_data = quant_grad.flat<T>().data();
     ConvamFilterGradFunctor<Device, T>()(
             context->eigen_device<Device>(),
             in_data,
@@ -906,7 +953,9 @@ public:
             filter_height,
             out,
             mul_lut_,
-            mode_
+            mode_,
+            quant_input_data,
+            quant_grad_data
             );
   }
   private:
@@ -952,7 +1001,7 @@ struct ConvamInputGradFunctor<CPUDevice, T> {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols,
-          approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
+          approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad
           ){
     for (int ibatch = 0; ibatch < batch; ++ibatch) {
         for (int out_y = 0; out_y < input_rows; ++out_y) {
@@ -1098,7 +1147,27 @@ class ConvamInputGradOp: public OpKernel {
         Tensor* in_backprop = nullptr;
         OP_REQUIRES_OK(context,
                        context->allocate_output(0, input_shape, &in_backprop));
-
+        // If mode_ is FP8HYB or FP8E5M2, create quant_filter and quant_grad tensors
+        Tensor quant_filter;
+        Tensor quant_grad;
+        if (mode_ == FloatMode::FP8HYB || mode_ == FloatMode::FP8E5M2) {
+          // handle quant_filter tensor
+          TensorShape quant_filter_shape = ShapeFromFormat(
+              data_format_, GetTensorDim(filter, data_format_, 'N'),
+              GetTensorDim(filter, data_format_, 'H'),
+              GetTensorDim(filter, data_format_, 'W'),
+              GetTensorDim(filter, data_format_, 'C'));
+          // allocate quant_filter tensor
+          OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_filter_shape, &quant_filter));
+          // handle quant_grad tensor
+          TensorShape quant_grad_shape = ShapeFromFormat(
+              data_format_, GetTensorDim(out_backprop, data_format_, 'N'),
+              GetTensorDim(out_backprop, data_format_, 'H'),
+              GetTensorDim(out_backprop, data_format_, 'W'),
+              GetTensorDim(out_backprop, data_format_, 'C'));
+          // allocate quant_grad tensor
+          OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_grad_shape, &quant_grad));
+        }
         if (input_shape.num_elements() == 0) {
           return;
         }
@@ -1157,7 +1226,8 @@ class ConvamInputGradOp: public OpKernel {
         auto in_data = filter.flat<T>().data();
         auto out = in_backprop->template flat<T>().data();
         auto rsfilter_data = rsfilter.flat<T>().data();
-
+        auto quant_filter_data = quant_filter.flat<T>().data();
+        auto quant_grad_data = quant_grad.flat<T>().data();
        // auto const oneinputsize = input_height*input_width*input_channel;
         //auto const oneoutputsize = grad_height*grad_width*output_channel;
         size_t const block_size = 16;
@@ -1198,7 +1268,9 @@ class ConvamInputGradOp: public OpKernel {
                 grad_height,
                 grad_width,
                 mul_lut_,
-                mode_
+                mode_,
+                quant_filter_data,
+                quant_grad_data
                 );
      }
   private:

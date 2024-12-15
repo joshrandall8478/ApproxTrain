@@ -21,9 +21,15 @@ using namespace tensorflow;
 #else
     #define fp32_add(a,b) ((a)+(b));
 #endif
+__device__ __forceinline__ float bf16_accumulate(float val, float b) {
+    float ret = __fadd_rz(val, b);
+    return __uint_as_float(__float_as_uint(ret) & 0xffff0000);
+}
 
-
-
+__device__ __forceinline__ float bf16_accumulate(float val, float b) {
+    float ret = __fadd_rz(val, b);
+    return __half2float(__float2half_rz(ret));
+}
 
 /*
     The following is for half precision that accumulate in FP32
@@ -657,8 +663,8 @@ __global__ void gemm_input_grad_fp8hyb(size_t m, size_t n, size_t k,
            __syncthreads();
      
            for (int j = 0; j < TILE_DIM; ++j) {
-               // activation are clipped to e4m3 and grad are clipped to e5m3
-               T mul_result = clip_fp8_e4m3(As[threadIdx.y][j])*clip_fp8_e5m2(Bs[j][threadIdx.x]); 
+               // activation are clipped to e4m3 and grad are clipped to e5m2
+               T mul_result = clip_fp8_e5m2(As[threadIdx.y][j])*clip_fp8_e4m3(Bs[j][threadIdx.x]); 
                // Accumulate the result
                value = fp32_add(value, mul_result);
            }
@@ -710,8 +716,8 @@ __global__ void gemm_filter_grad_fp8hyb(size_t m, size_t n, size_t k,
            __syncthreads();
      
            for (int j = 0; j < TILE_DIM; ++j) {
-               // grad are clipped to e5m2 and filter are clipped to e4m3
-               T mul_result = clip_fp8_e5m2(As[threadIdx.y][j])*clip_fp8_e4m3(Bs[j][threadIdx.x]); 
+               // grad are clipped to e5m2 and input are clipped to e4m3
+               T mul_result = clip_fp8_e4m3(As[threadIdx.y][j])*clip_fp8_e5m2(Bs[j][threadIdx.x]); 
                // Accumulate the result
                value = fp32_add(value, mul_result);
            }

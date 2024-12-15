@@ -61,7 +61,7 @@ template <typename T>
 struct DenseamFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* weights,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_weight
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -101,6 +101,19 @@ class DenseamOp: public OpKernel{
             const Tensor& weights = context->input(1);
             const TensorShape& input_shape = input.shape();
             const TensorShape& weights_shape = weights.shape();
+
+            Tensor quant_input;
+            Tensor quant_weight;
+            if ( mode_ == FloatMode::FP8HYB || mode_ == FloatMode::FP8E5M2) {
+                // handle quant_input tensor
+                TensorShape quant_input_shape = input_shape;
+                // allocate quant_input tensor
+                OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_input_shape, &quant_input));
+                // handle quant_weight tensor
+                TensorShape quant_weight_shape = weights_shape;
+                // allocate quant_weight tensor
+                OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_weight_shape, &quant_weight));
+            }
             DCHECK_EQ(input_shape.dims(), 2);
             DCHECK_EQ(weights_shape.dims(), 2);
             
@@ -123,6 +136,8 @@ class DenseamOp: public OpKernel{
             auto input_tensor = input.flat<T>().data();
             auto weights_tensor = weights.flat<T>().data();
             auto output_tensor = output->flat<T>().data();
+            auto quant_input_tensor = quant_input.flat<T>().data();
+            auto quant_weight_tensor = quant_weight.flat<T>().data();
             DenseamFunctor<Device, T>()(
                     context->eigen_device<Device>(),
                     input_tensor,
@@ -132,7 +147,9 @@ class DenseamOp: public OpKernel{
                     units,
                     input_width,
                     mul_lut_,
-                    mode_
+                    mode_,
+                    quant_input_tensor,
+                    quant_weight_tensor
                     );
         }
 
@@ -167,7 +184,7 @@ template <typename T>
 struct DenseamWeightGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_grad
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -182,7 +199,7 @@ template <typename T>
 struct DenseamInputGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* weight, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_weight, T* quant_grad
             ){
             for(int i = 0; i < batch; i++)
             for(int i = 0; i < batch; i++){
@@ -232,6 +249,26 @@ public:
     const Tensor& input_t = context->input(1);
     const Tensor& weights_t = context->input(2);
     
+    Tensor quant_input;
+    Tensor quant_weight;
+    Tensor quant_grad;
+    if ( mode_ == FloatMode::FP8HYB || mode_ == FloatMode::FP8E5M2) {
+        // handle quant_input tensor
+        TensorShape quant_input_shape = input_t.shape();
+        // allocate quant_input tensor
+        OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_input_shape, &quant_input));
+        // handle quant_weight tensor
+        TensorShape quant_weight_shape = weights_t.shape();
+        // allocate quant_weight tensor
+        OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_weight_shape, &quant_weight));
+        // handle quant_grad tensor
+        TensorShape quant_grad_shape = grad_t.shape();
+        // allocate quant_grad tensor
+        OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), quant_grad_shape, &quant_grad));
+    }
+    auto quant_input_data = quant_input.flat<T>().data();
+    auto quant_weight_data = quant_weight.flat<T>().data();
+    auto quant_grad_data = quant_grad.flat<T>().data();
     
     TensorShape grad_shape = grad_t.shape();
     TensorShape input_shape = input_t.shape();
@@ -259,7 +296,9 @@ public:
             units,
             input_width,
             mul_lut_,
-            mode_
+            mode_,
+            quant_input_data,
+            quant_grad_data
             );
     DenseamInputGradFunctor<Device, T>()(
             context->eigen_device<Device>(),    
@@ -270,7 +309,9 @@ public:
             units,
             input_width,
             mul_lut_,
-            mode_
+            mode_,
+            quant_weight_data,
+            quant_grad_data
             );
   }
   private:

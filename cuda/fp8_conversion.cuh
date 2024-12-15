@@ -21,26 +21,31 @@ __device__ __forceinline__ float fp32_from_bits(uint32_t u) {
     return fb.f;
 }
 
-// Convert fp32 to fp8 e4m3 with variable bias
-__device__ __forceinline__ uint8_t fp32_to_fp8_e4m3(float a, int fp8_bias=14) {
+// Convert from fp32 to fp8 e4m3
+__device__ __forceinline__ uint8_t fp32_to_fp8_e4m3(float a, int fp8_bias = 7) {
     const uint32_t FP32_SIGN_MASK = 0x80000000u;
     const uint32_t FP32_EXP_MASK  = 0x7F800000u;
     const uint32_t FP32_MANT_MASK = 0x007FFFFFu;
     const int      FP32_EXP_BIAS  = 127;
 
-    // e4m3 format constants
-    const int FP8_EXP_BITS  = 4;
-    const int FP8_MANT_BITS = 3;
-    const int FP8_EXP_MAX   = (1 << FP8_EXP_BITS) - 1; // 15
+    // FP8 E4M3 parameters
+    const int FP8_EXP_BITS   = 4;
+    const int FP8_MANT_BITS  = 3;
+    const int FP8_EXP_MAX    = (1 << FP8_EXP_BITS) - 1; // 15
+    // exponent=15 is Inf/NaN, so max normal exponent code=14
+    // Format: [sign:1][exponent:4][mantissa:3]
+    // Max normal: exponent=14 (1110), mantissa=111 (7) would overflow to Inf, so we choose exponent=1111, mant=110 for max normal
+    // but since we have Inf/NaN at exponent=15, max normal is actually exponent=14, mant=7 (0x6E?), let's match style of e5m2:
+    // Let's define:
+    // NaN chosen: exponent=1111 (0xF), mantissa=111 (0x7) => 0x7F
+    // Max normal: exponent=1111 (0xF), mantissa=110 (0x6) => 0x7E
+    // This gives a largest finite normal.
 
-    // Special patterns
-    // NaN = 0x7F (E=1111,M=111)
-    // Max normal = 0x7E (E=1111,M=110), sign adjusted for negative if needed
-    const uint8_t FP8_QUIET_NAN  = 0x7F;
-    const uint8_t FP8_MAX_NORMAL = 0x7E;
+    const uint8_t NAN_FP8       = 0x7F;
+    const uint8_t MAX_NORMAL_FP8 = 0x7E; 
 
     uint32_t bits = fp32_to_bits(a);
-    uint32_t sign_bit = (bits & FP32_SIGN_MASK) >> 24; 
+    uint32_t sign = (bits & FP32_SIGN_MASK) >> 24; // move sign to bit 7 of the fp8 byte
     uint32_t biased_exp = (bits & FP32_EXP_MASK) >> 23;
     uint32_t mant = bits & FP32_MANT_MASK;
 
@@ -48,109 +53,143 @@ __device__ __forceinline__ uint8_t fp32_to_fp8_e4m3(float a, int fp8_bias=14) {
     if (biased_exp == 0xFF) {
         if (mant != 0) {
             // NaN
-            return (uint8_t)(sign_bit | FP8_QUIET_NAN);
+            return (uint8_t)(sign | NAN_FP8);
         } else {
-            // Inf -> map to max normal
-            return (uint8_t)(sign_bit | FP8_MAX_NORMAL);
+            // Infinity: clamp to max normal
+            return (uint8_t)(sign | MAX_NORMAL_FP8);
         }
     }
 
-    // Zero
     if (biased_exp == 0 && mant == 0) {
-        return (uint8_t)sign_bit; 
+        // Zero
+        return (uint8_t)sign; 
     }
 
-    int unbiased_exp = (int)biased_exp - FP32_EXP_BIAS;
-    int e = unbiased_exp + fp8_bias;
+    // Compute the unbiased exponent
+    int exp = (int)biased_exp - FP32_EXP_BIAS;
+    // Adjust exponent by fp8_bias
+    exp += fp8_bias;
 
-    // Overflow -> max normal
-    if (e > FP8_EXP_MAX) {
-        return (uint8_t)(sign_bit | FP8_MAX_NORMAL);
+    if (exp > 15  | (exp == 15 && mant > 6)) {
+        // Clamp to max normal
+        return (uint8_t)(sign | MAX_NORMAL_FP8);
     }
 
-    // Shift for mantissa extraction
-    const int M_SHIFT = (23 - FP8_MANT_BITS);
+    // Handle subnormals and underflow
+    if (exp <= 0) {
+        if (exp < 1 - FP8_MANT_BITS) {
+            return (uint8_t)sign;
+        }
 
-    if (e >= 1) {
-        // Normal number in fp8
-        uint32_t mant_fp8 = mant >> M_SHIFT;
-        uint32_t rounding_bit = (mant >> (M_SHIFT - 1)) & 1;
-        if (rounding_bit) mant_fp8++;
-        if (mant_fp8 > 0x07) {
-            // Rounding overflow
-            mant_fp8 = 0x07;
-            e += 1;
-            if (e > FP8_EXP_MAX) {
-                return (uint8_t)(sign_bit | FP8_MAX_NORMAL);
+        // Add implicit leading 1 if original FP32 was normal
+        if (biased_exp != 0) {
+            mant |= 0x00800000u;
+        }
+        // shift to get the subnormal mantissa
+        // For subnormal: value = mant_fp8/8 * 2^-14 if bias=7
+        // shift = (23 - 3) + (1 - exp) = 20 + (1 - exp) = 21 - exp
+        int shift = 21 - exp;
+        uint32_t val = mant;
+        uint32_t mant_fp8 = val >> shift;
+
+        // Rounding half-up
+        if (shift > 0 && (val & (1u << (shift - 1)))) {
+            mant_fp8++;
+            // return smallest normal number
+            if (mant_fp8 == 8) {
+                return (uint8_t)(sign | 0x8);
             }
         }
-        uint8_t fp8 = (uint8_t)(sign_bit | ((e << FP8_MANT_BITS) & 0x78) | (mant_fp8 & 0x07));
-        return fp8;
-    } else {
-        // Subnormal or zero
-        // Check for too small values -> zero
-        if (unbiased_exp < (1 - fp8_bias - FP8_MANT_BITS)) {
-            return (uint8_t)sign_bit;
+
+
+        if (mant_fp8 == 0) {
+            // too small
+            return (uint8_t)sign;
         }
 
-        // Subnormal
-        int shift = (1 - e) + M_SHIFT; 
-        uint32_t val = (mant | 0x00800000u);
-        uint32_t sub_mant = val >> shift;
-        if (shift > 0 && (val & (1u << (shift - 1)))) {
-            sub_mant++;
-        }
-        if (sub_mant > 0x07) sub_mant = 0x07;
-        if (sub_mant == 0) {
-            // tiny -> zero
-            return (uint8_t)sign_bit;
-        }
-        return (uint8_t)(sign_bit | (sub_mant & 0x07));
+        // subnormal exponent=0
+        uint8_t fp8 = (uint8_t)(sign | (mant_fp8 & 0x07));
+        return fp8;
     }
+
+    // Normal number:
+    // shift mant to get fp8 mantissa
+    uint32_t mant_round_bit = 1u << (23 - FP8_MANT_BITS - 1);
+    uint32_t mant_fp8 = mant >> (23 - FP8_MANT_BITS);
+
+    // Rounding
+    if (mant & mant_round_bit) {
+        mant_fp8++;
+        if (mant_fp8 > 0x07) {
+            // overflow in mantissa
+            mant_fp8 = 0x00; // after increment = 0x08, mask will reduce but handle carefully
+            exp++;
+            if (exp >= (FP8_EXP_MAX - 1)) {
+                // overflow in exponent
+                return (uint8_t)(sign | MAX_NORMAL_FP8);
+            }
+        }
+    }
+    mant_fp8 &= 0x07; // 3-bit mantissa
+
+    // Combine sign, exponent, mantissa
+    // exp between 1 and 14 for normal
+    uint8_t fp8 = (uint8_t)(sign | ((exp << FP8_MANT_BITS) & 0x78) | (mant_fp8 & 0x07));
+    return fp8;
 }
 
-// Convert fp8 e4m3 to fp32 with variable bias
-__device__ __forceinline__ float fp8_e4m3_to_fp32(uint8_t h, int fp8_bias=14) {
-    const int FP8_EXP_BITS  = 4;
-    const int FP8_MANT_BITS = 3;
 
-    uint32_t sign = (h & 0x80) ? 1 : 0;
-    uint32_t exponent = (h >> FP8_MANT_BITS) & 0x0F;
-    uint32_t mantissa = h & 0x07;
+// Convert from fp8 e4m3 to fp32
+__device__ __forceinline__ float fp8_e4m3_to_fp32(uint8_t h, int fp8_bias = 7) {
+    // const int FP8_EXP_BITS   = 4;
+    const int FP8_MANT_BITS  = 3;
+    const int FP8_EXP_MASK   = 0x0F; // 4 bits
+
+    uint32_t sign     = (h & 0x80) ? 1 : 0;
+    uint32_t exponent = (h >> FP8_MANT_BITS) & FP8_EXP_MASK;
+    uint32_t mantissa = h & ((1 << FP8_MANT_BITS) - 1); // 3 bits
 
     uint32_t out_sign = sign << 31;
-    int out_exp;
+    int32_t out_exp;
     uint32_t out_mant;
 
-    if (exponent == 0x0F) {
-        // Possibly NaN or max normal pattern
-        if (mantissa == 0x07) {
-            // NaN
-            out_exp = 0xFF;
-            out_mant = 0x200000; // quiet NaN
-        } else {
-            // max normal pattern (no Inf)
-            int e = 15 - fp8_bias; 
-            out_exp = 127 + e;
-            out_mant = (1 << 23) + (mantissa << (23 - FP8_MANT_BITS));
-        }
+    if (exponent == 0x0F && mantissa == 0x07) {
+        out_exp = 0xFF;
+        out_mant = 0x200000; // Quiet NaN
     } else if (exponent == 0) {
+        // Subnormal or zero
         if (mantissa == 0) {
             // zero
             out_exp = 0;
             out_mant = 0;
         } else {
-            // subnormal
-            // exponent = 1 - fp8_bias
-            int e = 1 - fp8_bias;
-            // subnormals have no implicit 1
-            out_exp = 127 + e - 1;
-            out_mant = (mantissa << (23 - FP8_MANT_BITS));
+
+            // Subnormal
+            // Start with the exponent for subnormals in FP8
+            int32_t e = 1 - fp8_bias; // Exponent for subnormal FP8
+            out_exp = 127 + e; // Map FP8 exponent to FP32 range
+
+            // Normalise the mantissa by finding the leading 1 position
+            uint32_t frac = mantissa;
+            int shift = 0;
+            while ((frac & 0x8) == 0) { // Keep shifting until the MSB is aligned
+                frac <<= 1;
+                shift++;
+            }
+
+            // Adjust the exponent based on the number of shifts
+            out_exp -= shift;
+
+            // Place the mantissa in the FP32 fraction field
+            out_mant = (frac & 0x7) << (23 - FP8_MANT_BITS);
         }
     } else {
-        // normal
-        int e = (int)exponent - fp8_bias;
-        out_exp = 127 + e;
+        // Normal
+        int32_t e = (int32_t)exponent - fp8_bias;
+        out_exp = 127 + e; 
+        // normal: (1 + mantissa/8)
+        // implicit 1: (1<<23)
+        // mantissa << (23-3) = mantissa<<20
         out_mant = (1 << 23) + (mantissa << (23 - FP8_MANT_BITS));
     }
 
@@ -159,23 +198,39 @@ __device__ __forceinline__ float fp8_e4m3_to_fp32(uint8_t h, int fp8_bias=14) {
     return fp32_from_bits(out_bits);
 }
 
+
 // Clipping function: fp32 -> fp8 e4m3 -> fp32 with variable bias
-__device__ __forceinline__ float clip_fp8_e4m3(float a, int fp8_bias=14) {
+__device__ __forceinline__ float clip_fp8_e4m3(float a, int fp8_bias=7) {
     uint8_t h = fp32_to_fp8_e4m3(a, fp8_bias);
     return fp8_e4m3_to_fp32(h, fp8_bias);
+    // convert float to uint32_t
+    // uint32_t b = fp32_to_bits(a);
+    // b = b & 0xfffc0000;
+    // // convert back to float
+    // return fp32_from_bits(b);
+    // convert to half
+    // __half b = __float2half(a);
+    // // as uint
+    // uint16_t h = __half_as_ushort(b);
+    // // convert to fp8 e4m3
+    // h = h & 0xff80;
+    // // convert back to half
+    // b = __ushort_as_half(h);
+    // // convert back to float
+    // return __half2float(b);
     // return a;
 }
 
 // Convert from fp32 to fp8 e5m2 with variable bias
 // Clamps large values to max normal, flushes very small values to zero
-__device__ __forceinline__ uint8_t fp32_to_fp8_e5m2(float a, int fp8_bias = 32) {
+__device__ __forceinline__ uint8_t fp32_to_fp8_e5m2(float a, int fp8_bias = 15) {
     const uint32_t FP32_SIGN_MASK = 0x80000000u;
     const uint32_t FP32_EXP_MASK  = 0x7F800000u;
     const uint32_t FP32_MANT_MASK = 0x007FFFFFu;
     const int      FP32_EXP_BIAS  = 127;
 
     // FP8 E5M2 parameters
-    const int FP8_EXP_BITS   = 5;
+    // const int FP8_EXP_BITS   = 5;
     const int FP8_MANT_BITS  = 2;
     const int FP8_EXP_MAX    = 31;
     // Exponent=31 is for Inf/NaN. So max normal exponent code = 30
@@ -222,41 +277,40 @@ __device__ __forceinline__ uint8_t fp32_to_fp8_e5m2(float a, int fp8_bias = 32) 
     // Handle subnormals and underflow
     // For exponent <= 0, we may have subnormals
     if (exp <= 0) {
-        // For subnormal in e5m2:
-        // value = sign * mantissa/(2^m) * 2^(1 - bias) 
-        // If exp < - (2+1) [some margin], flush to zero.
-        // The smallest exponent for normal is 1 - fp8_bias.
-        // If we are too small, just return zero.
-        if (exp < -((1 << FP8_MANT_BITS))) {
-            return (uint8_t)sign; // Underflow to zero
+        if (exp < -1) {
+            // The value is too small even for subnormal.
+            // Flush to zero, preserving sign.
+            return (uint8_t)sign;
         }
 
-        // Prepare for subnormal: 
-        // Add implicit leading 1 to mantissa if originally was a normal fp32 number
-        mant |= 0x00800000u; 
-        // Shift mantissa to fit into 2 bits after adjusting for subnormal scale
-        // Each decrement in exp below 1 means dividing by 2.
-        int shift = 23 - FP8_MANT_BITS + (1 - exp); 
-        // (1 - exp) is how many extra powers of two we need to shift by.
-        // exp ≤ 0, so (1 - exp) ≥ 1
-        // Example: if exp = 0 => shift = 23 - 2 + 1 = 22 bits
-        // If exp = -1 => shift = 23 - 2 + 2 = 23 bits, etc.
+        // add implicit 1 for original mantissa
+        mant |= 0x00800000u;
+        
+        // If biased_exp == 0 (FP32 subnormal), we do not add the implicit 1.
 
-        // Avoid negative shifts just in case, but we already handled that by checking exp.
-        if (shift > 31) shift = 31; // safety
-        uint32_t mant_fp8 = mant >> shift;
+   
+        int shift = 22 - exp; // shift to get the mantissa 23 - 2 + 1 - exp
 
-        // Rounding: check next bit for rounding up
-        // If the bit just below the cut is set, round up
-        // This is a simple round half up strategy.
-        if (shift > 0 && (mant & (1u << (shift-1)))) {
+
+        uint32_t val = mant;
+        uint32_t mant_fp8 = val >> shift;
+
+        // Rounding half-up: check the bit below the truncated bits
+        if (val & (1u << (shift - 1))) {
             mant_fp8++;
+            if (mant_fp8 == 4) {
+                return (uint8_t)(sign | 0x4);
+            }
         }
 
-        // Mask mantissa
-        mant_fp8 &= 0x03;
+   
 
-        // For subnormals in FP8, exponent = 0
+        // If rounding results in zero, the value is too small
+        if (mant_fp8 == 0) {
+            return (uint8_t)sign;
+        }
+
+        // Construct subnormal fp8 value (exponent=0)
         uint8_t fp8 = (uint8_t)(sign | mant_fp8);
         return fp8;
     }
@@ -270,6 +324,20 @@ __device__ __forceinline__ uint8_t fp32_to_fp8_e5m2(float a, int fp8_bias = 32) 
     // Rounding up if the next bit after truncated bits is set
     if (mant & mant_round_bit) {
         mant_fp8++;
+        if (mant_fp8 == 4) {
+            // Overflow in mantissa
+            mant_fp8 = 0;
+            exp++;
+            // overflow in exp
+            // Handle very large exponent (overflow)
+            if (exp >= (FP8_EXP_MAX - 1)) {
+                // Clamp to max normal
+                return (uint8_t)(sign | MAX_NORMAL_FP8);
+            }
+        }
+
+    
+
     }
     mant_fp8 &= 0x03; // 2-bit mantissa
 
@@ -281,11 +349,11 @@ __device__ __forceinline__ uint8_t fp32_to_fp8_e5m2(float a, int fp8_bias = 32) 
 
 
 // Convert from fp8 e5m2 to fp32
-__device__ __forceinline__ float fp8_e5m2_to_fp32(uint8_t h, int fp8_bias = 32) {
-    const int FP8_EXP_BITS   = 5;
+__device__ __forceinline__ float fp8_e5m2_to_fp32(uint8_t h, int fp8_bias = 15) {
+    //  const int FP8_EXP_BITS   = 5;
     const int FP8_MANT_BITS  = 2;
     const int FP8_EXP_MASK   = 0x1F; // 5 bits
-    const int FP8_EXP_BIAS   = fp8_bias;
+    // const int FP8_EXP_BIAS   = fp8_bias;
     
     // Extract sign, exponent, mantissa
     uint32_t sign     = (h & 0x80) ? 1 : 0;
@@ -314,30 +382,24 @@ __device__ __forceinline__ float fp8_e5m2_to_fp32(uint8_t h, int fp8_bias = 32) 
             out_exp = 0; 
             out_mant = 0;
         } else {
-            // subnormal
-            // value = (-1)^sign * (mantissa/(2^m)) * 2^(1 - bias)
-            // in fp32: out_exp = 127 + (1 - fp8_bias) - 1 (for subnormal no leading 1)
-            // Actually: smallest normal exponent = 1 - bias
-            // subnormal exponent in fp32 = (1 - bias) - 1 = -bias
-            // So out_exp = FP32_BIAS + ((1 - FP8_BIAS) - 1) = FP32_BIAS - FP8_BIAS
-            // Actually simpler: 
-            // For subnormals: exponent in linear form = 1 - FP8_BIAS
-            // out_exp = 127 + (1 - FP8_BIAS)
-            int32_t e = 1 - fp8_bias; 
-            out_exp = 127 + e; 
-            // fraction = mantissa / (2^2) * 2^(e)
-            // to build mantissa in fp32: (fraction = mantissa/(4)) * 2^e
-            // We'll construct out_mant accordingly:
-            // fraction * 2^(out_exp-127) = mantissa/(4)
-            // mantissa/(4) means shift mantissa up by (23 - 2) bits for fp32
-            // but we have no leading 1, so just place mantissa in mant bits:
-            uint32_t frac = mantissa; 
-            // place mantissa in 23-bit fraction field: frac * 2^(23-2)=frac<<21
-            out_mant = frac << (23 - FP8_MANT_BITS);
-            // no leading 1 in subnormals, so no extra addition
-            // might need to adjust exponent if resulting fraction < 1.0
-            // Actually subnormal: fraction = mantissa/(4)
-            // So final: sign + out_exp + out_mant good.
+        // Subnormal
+        // Start with the exponent for subnormals in FP8
+        int32_t e = 1 - fp8_bias; // Exponent for subnormal FP8
+        out_exp = 127 + e; // Map FP8 exponent to FP32 range
+
+        // Normalise the mantissa by finding the leading 1 position
+        uint32_t frac = mantissa;
+        int shift = 0;
+        while ((frac & 0x4) == 0) { // Keep shifting until the MSB is aligned
+            frac <<= 1;
+            shift++;
+        }
+
+        // Adjust the exponent based on the number of shifts
+        out_exp -= shift;
+
+        // Place the mantissa in the FP32 fraction field
+        out_mant = (frac & 0x3) << (23 - FP8_MANT_BITS);
         }
     } else {
         // Normal number
@@ -357,11 +419,29 @@ __device__ __forceinline__ float fp8_e5m2_to_fp32(uint8_t h, int fp8_bias = 32) 
     uint32_t out_bits = (out_sign & 0x80000000) | out_exp_bits | (out_mant & 0x7FFFFF);
     return fp32_from_bits(out_bits);
 }
-__device__ __forceinline__ float clip_fp8_e5m2(float a, int fp8_bias=32) {
+__device__ __forceinline__ float clip_fp8_e5m2(float a, int fp8_bias=31) {
     // Direct round-trip:
     uint8_t h = fp32_to_fp8_e5m2(a, fp8_bias);
     return fp8_e5m2_to_fp32(h, fp8_bias);
-    return a;
+    // convert float to uint32_t
+    // uint32_t b = fp32_to_bits(a);  
+    // b = b & 0xffff0000;
+    // // convert back to float
+    // return fp32_from_bits(b);  
+    // // convert to half
+    // __half b = __float2half(a);
+    // // as uint
+    // uint16_t h = __half_as_ushort(b);
+    // // convert to fp8 e5m2
+    // h = h & 0xff00;
+    // // convert back to half
+    // b = __ushort_as_half(h);
+    // // convert back to float
+    // return __half2float(b);
+
+    // uint8_t h = fp32_to_fp8_e4m3(a, 7);
+    // return fp8_e4m3_to_fp32(h, 7);
+    // return a;
 }
 
 

@@ -9,6 +9,7 @@
 #include <cuda_fp16.h>
 #include "fp8_conversion.cuh"
 #include <iostream>
+#include "quant.cuh"
 using namespace tensorflow;
 using GpuDevice = Eigen::GpuDevice;
 // start of new kernels
@@ -321,7 +322,7 @@ __global__ void DenseamInputKernel_fp8_e5m2(
     const int batch, 
     const int units, 
     T* grad_inputs
-    ) 
+    )
 { 
     unsigned int ix = blockIdx.x * blockDim.x + threadIdx.x; 
     if(ix < batch *input_width)
@@ -333,6 +334,82 @@ __global__ void DenseamInputKernel_fp8_e5m2(
         for (int ix_unit = 0; ix_unit < units; ix_unit++)
         {   
             T mul = clip_fp8_e5m2(weights[ix_input*units+ ix_unit]) * clip_fp8_e5m2(grads[ix_sample*units+ix_unit]);
+            grad_inputs[ix] = fp32_add(mul, grad_inputs[ix]);
+        }
+    }
+};
+
+template <typename T>
+__global__ void DenseamKernel_fp8hyb(
+    const T* inputs,
+    const T* weights,
+    const int batch, 
+    const int units, 
+    const int input_width, 
+    T* output
+    ) 
+{ 
+    unsigned int ix = blockIdx.x * blockDim.x + threadIdx.x; 
+    if(ix < units*batch)
+    {
+        int ix_unit = ix % units ;
+        int ix_sample = ix / units;
+        output[ix] = T(0);
+        for (int ix_input = 0; ix_input < input_width; ix_input++)
+        {
+          // e4m3 for activations and filter tensor
+          T mul = clip_fp8_e4m3(inputs[ix_sample*input_width+ix_input]) * clip_fp8_e4m3(weights[ix_input*units+ix_unit]);
+          output[ix] = fp32_add(mul, output[ix]);
+        }  
+    }
+};
+
+template <typename T>
+__global__ void DenseamWeightsKernel_fp8hyb(
+    const T* grads,
+    const T* inputs,
+    const int input_width, 
+    const int batch, 
+    const int units, 
+    T* grad_weights
+    ) 
+{ 
+    unsigned int ix = blockIdx.x * blockDim.x + threadIdx.x; 
+    if(ix < units*input_width)
+    {
+        int ix_unit = ix % units ;
+        int ix_input = ix / units;
+        grad_weights[ix] = T(0);
+        for (int ix_sample = 0; ix_sample < batch; ix_sample++)
+        {
+            // e4m3 for activations and e5m2 for gradient
+            T mul = clip_fp8_e4m3(inputs[input_width*ix_sample+ix_input]) * clip_fp8_e5m2(grads[ix_sample*units+ix_unit]);
+            grad_weights[ix] = fp32_add(mul, grad_weights[ix]);
+        }  
+    }
+};
+
+template <typename T>
+__global__ void DenseamInputKernel_fp8hyb(
+    const T* grads,
+    const T* weights,
+    const int input_width, 
+    const int batch, 
+    const int units, 
+    T* grad_inputs
+    ) 
+{ 
+    unsigned int ix = blockIdx.x * blockDim.x + threadIdx.x; 
+    if(ix < batch *input_width)
+    {
+        int ix_input = ix % input_width;
+        int ix_sample = ix / input_width ;
+        grad_inputs[ix] = T(0);
+
+        for (int ix_unit = 0; ix_unit < units; ix_unit++)
+        {   
+            // e4m3 for weights and e5m2 for gradient
+            T mul = clip_fp8_e4m3(weights[ix_input*units+ ix_unit]) * clip_fp8_e5m2(grads[ix_sample*units+ix_unit]);
             grad_inputs[ix] = fp32_add(mul, grad_inputs[ix]);
         }
     }
@@ -647,7 +724,8 @@ template <typename T>
 void DenseamFunctor<GpuDevice, T>::operator()(
         const GpuDevice& d, const T* inputs, const T* weights, T* output,
         const int batch, const int units, const int input_width,
-        approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode)
+        approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_weight
+        )
 { 
     unsigned blocksize = 1024;
     unsigned gridsize = (batch*units+blocksize -1)/blocksize;
@@ -656,6 +734,8 @@ void DenseamFunctor<GpuDevice, T>::operator()(
     // // print if lut is used
     // std::cout << "LUT: " << mul_lut.is_lut() << std::endl;
     // check if mul_lut
+    const int input_size = batch * input_width;
+    const int weight_size = input_width * units;
     if (mul_lut.is_lut()){
         // using case for different float modes
         switch (mode){
@@ -665,6 +745,8 @@ void DenseamFunctor<GpuDevice, T>::operator()(
                 break;
             case FloatMode::FP8HYB:
                 // use DenseamKernel_lut_e4m3 with lut for forward pass    
+                std::cerr << "FP8HYB lut not supported" << std::endl;
+                return;
                 DenseamKernel_lut_e4m3<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_());
                 
                 break;
@@ -689,13 +771,17 @@ void DenseamFunctor<GpuDevice, T>::operator()(
         // no lut all accurate
         switch (mode){
             case FloatMode::FP8E5M2:  
-                // use DenseamKernel_fp8_e5m2 without lut for both forward pass  
-                DenseamKernel_fp8_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
+
+                quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, input_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, weights, quant_weight, weight_size);
+                
+                DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
                 break;
             case FloatMode::FP8HYB:
-                // use DenseamKernel_fp8_e4m3 without lut for forward pass
-                DenseamKernel_fp8_e4m3<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
-                //DenseamKernel_fp16<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
+
+                quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, input_size);
+                quant_fp32_e4m3clipping_launcher<T>(d, weights, quant_weight, weight_size);
+                DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
                 break;
             case FloatMode::FP16:
                 // use DenseamKernel_fp16 without lut for both forward pass
@@ -722,10 +808,12 @@ template <typename T>
 void DenseamWeightGradFunctor<GpuDevice, T>::operator()
     (const GpuDevice& d, const T* inputs, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode )
+            approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_grad)
 {
     unsigned blocksize = 1024;
     unsigned gridsize = (units*input_width+blocksize -1)/blocksize;
+    const int input_size = batch * input_width;
+    const int grad_size = batch * units;
     // check if mul_lut
     if (mul_lut.is_lut()){
         // using case for different float modes
@@ -735,8 +823,9 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
                 DenseamWeightsKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP8HYB:
-                // use DenseamWeightsKernel_lut_e5m2 with lut for backward pass    
-                DenseamWeightsKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
+                std::cerr << "FP8HYB lut not supported" << std::endl;
+                return;
+                DenseamWeightsKernel_fp8hyb<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output);
                 break;
             case FloatMode::FP16:
                 // use denseamweightskernel_5exp with lut for backward pass
@@ -759,12 +848,14 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
         // no lut all accurate
         switch(mode){
             case FloatMode::FP8E5M2:  
-                // use DenseamWeightsKernel_fp8_e5m2 without lut for backward pass  
-                DenseamWeightsKernel_fp8_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output);
+                quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, input_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                DenseamWeightsKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_grad, quant_input, input_width, batch, units, output);
                 break;
             case FloatMode::FP8HYB:
-                // use DenseamWeightsKernel_fp8_e5m2 without lut for backward pass
-                DenseamWeightsKernel_fp8_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, inputs, input_width, batch, units, output);
+                quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, input_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                DenseamWeightsKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_grad, quant_input, input_width, batch, units, output);
                 break;
             case FloatMode::FP16:
                 // use DenseamWeightsKernel_fp16 without lut for both backward pass
@@ -791,11 +882,12 @@ template <typename T>
 void DenseamInputGradFunctor<GpuDevice, T>::operator()
     (const GpuDevice& d, const T* weights, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode)
+            approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode, T* quant_weight, T* quant_grad)
 {
     unsigned blocksize = 1024;
     unsigned gridsize = (batch*input_width+blocksize -1)/blocksize;
-
+    const int weight_size = input_width * units;
+    const int grad_size = batch * units;
     // check if mul_lut
     if (mul_lut.is_lut()){
         // using case for different float modes
@@ -806,6 +898,8 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
                 break;
             case FloatMode::FP8HYB:
                 // use DenseamInputKernel_lut_e5m2 with lut for backward pass    
+                std::cerr << "FP8HYB lut not supported" << std::endl;
+                return;
                 DenseamInputKernel_lut_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output, mul_lut.get_mant_mul_lut_text_());
                 break;
             case FloatMode::FP16:
@@ -829,13 +923,14 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
         // no lut all accurate
         switch(mode){
             case FloatMode::FP8E5M2:  
-                // use DenseamInputKernel_fp8_e5m2 without lut for backward pass  
-                DenseamInputKernel_fp8_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output);
+                quant_fp32_e5m2clipping_launcher<T>(d, weights, quant_weight, weight_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                DenseamInputKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_grad, quant_weight, input_width, batch, units, output);
                 break;
             case FloatMode::FP8HYB:
-                // use DenseamInputKernel_fp8_e5m2 without lut for backward pass
-                DenseamInputKernel_fp8_e5m2<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output);
-                //DenseamInputKernel_fp16<T><<<gridsize, blocksize, 0, d.stream()>>>(grads, weights, input_width, batch, units, output);
+                quant_fp32_e4m3clipping_launcher<T>(d, weights, quant_weight, weight_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                DenseamInputKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_grad, quant_weight, input_width, batch, units, output);
                 break;
             case FloatMode::FP16:
                 // use DenseamInputKernel_fp16 without lut for backward pass

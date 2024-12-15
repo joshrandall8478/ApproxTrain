@@ -101,20 +101,10 @@ void GEMM_LAUNCHER(
         switch (mode){
             case FloatMode::FP8E5M2:  
                 // use gemm_e5m2 without lut for both forward and backward pass  
-                gemm_e5m2<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                 break;
             case FloatMode::FP8HYB:
-                if (forward_pass){
-                    // e4m3 clipping for activations and filter
-                    gemm_foward_fp8hyb<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                } else {
-                    // e5m2 clipping for gradients and e4m3 clipping for activations and filter
-                    if (input_grad){
-                        gemm_input_grad_fp8hyb<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                    } else {
-                        gemm_filter_grad_fp8hyb<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                    }
-                }
+                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                 break;
             case FloatMode::FP16:
                 // use gemm_fp16 without lut for both forward and backward pass

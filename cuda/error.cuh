@@ -1,11 +1,9 @@
+#ifndef ERROR_CUH
+#define ERROR_CUH
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <math.h>
-
-#ifndef ERROR_CUH
-#define ERROR_CUH
-
 #define checkCudaError() { gpuAssert(__FILE__, __LINE__); }
 
 static inline void gpuAssert(const char *file, int line){
