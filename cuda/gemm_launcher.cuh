@@ -50,33 +50,15 @@ void GEMM_LAUNCHER(
     bool input_grad
 ){
 
-    // //print floatmode
-    // std::cout << "FloatMode: " << FloatModeToString(mode) << std::endl;
-
-    // // print if lut is used
-    // std::cout << "LUT: " << mul_lut.is_lut() << std::endl;
-
-    // check if mul_lut
+    /* Note: FP8 quantization happens prior to GEMM operations, see cuda_kernel.cu */
     if (mul_lut.is_lut()){
         // using case for different float modes
         switch (mode){
             case FloatMode::FP8E5M2:  
-                // use gemm_e5m2 with lut for both forward and backward pass  
-                gemm_e5m2<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_());
+                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                 break;
             case FloatMode::FP8HYB:
-                if (forward_pass){
-                    // use gemm_e4m3 with lut for forward pass
-                    std::cerr << "Not implemented" << std::endl;
-                    return;
-                    gemm_e4m3<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_());
-                } else {
-                    // use gemm_e5m2 with lut for backward pass
-                    // exit and say not implemented
-                    std::cerr << "Not implemented" << std::endl;
-                    return;
-                    gemm_e5m2<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_());
-                }
+                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                 break;
             case FloatMode::FP16:
                 // use gemm_5exp with lut for both forward and backward pass
@@ -100,7 +82,6 @@ void GEMM_LAUNCHER(
         // no lut all accurate
         switch (mode){
             case FloatMode::FP8E5M2:  
-                // use gemm_e5m2 without lut for both forward and backward pass  
                 gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                 break;
             case FloatMode::FP8HYB:
