@@ -177,7 +177,7 @@ template <typename T>
 struct DenseamWeightGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_grad, AccumMode accum_mode
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_grad, AccumMode accum_mode, T *input_T
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -192,7 +192,7 @@ template <typename T>
 struct DenseamInputGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* weight, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_weight, T* quant_grad, AccumMode accum_mode
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_weight, T* quant_grad, AccumMode accum_mode, T *weight_T
             ){
             for(int i = 0; i < batch; i++)
             for(int i = 0; i < batch; i++){
@@ -264,6 +264,16 @@ public:
     int input_width= input_shape.dim_size(1);  //Number of values in each sample
     int batch = input_shape.dim_size(0); //Number of samples in batch
     int units = weights_shape.dim_size(1); //Number of units
+
+    Tensor transposed_input;
+    Tensor transposed_weight;
+    // {batch, input_width} -> {input_width, batch}
+    OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), TensorShape({input_width, batch}), &transposed_input));
+    // {input_width, units} -> {units, input_width}
+    OP_REQUIRES_OK(context, context->allocate_temp(DataTypeToEnum<T>::v(), TensorShape({units, input_width}), &transposed_weight));
+
+    auto transposed_input_data = transposed_input.flat<T>().data();
+    auto transposed_weight_data = transposed_weight.flat<T>().data();
     
     auto grad = grad_t.flat<T>().data();
     auto input = input_t.flat<T>().data();
@@ -282,7 +292,8 @@ public:
             mode_,
             quant_input_data,
             quant_grad_data,
-            accum_mode_
+            accum_mode_,
+            transposed_input_data
             );
     DenseamInputGradFunctor<Device, T>()(
             context->eigen_device<Device>(),    
@@ -296,7 +307,8 @@ public:
             mode_,
             quant_weight_data,
             quant_grad_data,
-            accum_mode_
+            accum_mode_,
+            transposed_weight_data
             );
   }
   private:
