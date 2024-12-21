@@ -1075,7 +1075,7 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
                 break;
             case FloatMode::FP8HYB:
                 quant_fp32_e4m3clipping_launcher<T>(d, input_T, quant_input, input_size);
-                quant_fp32_e4m3clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
                 break;
             default:
                 break;
@@ -1119,7 +1119,7 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
                 break;
             case FloatMode::FP8HYB:
                 quant_fp32_e4m3clipping_launcher<T>(d, weight_T, quant_weight, weight_size);
-                quant_fp32_e4m3clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
                 break;
             default:
                 break;
