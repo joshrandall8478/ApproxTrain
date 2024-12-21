@@ -4,7 +4,7 @@ from python.keras.layers.amdenselayer import denseam
 from models.resnet import build_resnet_cifar
 
 # Build the ResNet model (e.g., ResNet20 for CIFAR)
-model = build_resnet_cifar(input_shape=(32, 32, 3), num_classes=10, depth=20, lut_file='', FPMode="FP8HYB")
+model = build_resnet_cifar(input_shape=(32, 32, 3), num_classes=10, depth=20, lut_file='', FPMode="FP32", AccumMode="RNE")
 
 # Extract configurations of AMDense layers, rebuild layers, and also rebuild corresponding Dense layers
 AMDense_layers = []
@@ -22,6 +22,7 @@ for layer in model.layers:
         dense_config = config.copy()
         dense_config.pop('mant_mul_lut', None)
         dense_config.pop('FPMode', None)
+        dense_config.pop('AccumMode', None)
         Dense = tf.keras.layers.Dense(**dense_config)
 
         AMDense_layers.append(AMDense)

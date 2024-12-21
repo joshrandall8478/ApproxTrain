@@ -12,6 +12,7 @@
 #include "quant.cuh"
 #include "floatmode.h"
 #include "accumulate.cuh"
+#include "gemm_launcher.cuh"
 using namespace tensorflow;
 using GpuDevice = Eigen::GpuDevice;
 // start of new kernels
@@ -1017,188 +1018,38 @@ void DenseamFunctor<GpuDevice, T>::operator()(
         approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_weight, AccumMode accum_mode
         )
 { 
-    unsigned blocksize = 1024;
-    unsigned gridsize = (batch*units+blocksize -1)/blocksize;
+    T* input_data = const_cast<T*>(inputs);
+    T* weight_data = const_cast<T*>(weights);
+    // quantize the inputs and weights
     const int input_size = batch * input_width;
     const int weight_size = input_width * units;
-    switch (mode){
-        case FloatMode::FP8E5M2:  
-            quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, input_size);
-            quant_fp32_e5m2clipping_launcher<T>(d, weights, quant_weight, weight_size);
-            break;
-        case FloatMode::FP8HYB:
-            quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, input_size);
-            quant_fp32_e4m3clipping_launcher<T>(d, weights, quant_weight, weight_size);
-            break;
-        default:
-            break;
-        break;
-    }
-    if (mul_lut.is_lut()){
-        // using case for different float modes
-        
+    if (mode == FloatMode::FP8HYB || mode == FloatMode::FP8E5M2) {
         switch (mode){
             case FloatMode::FP8E5M2:  
+                quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, input_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, weights, quant_weight, weight_size);
+                break;
             case FloatMode::FP8HYB:
-                switch (accum_mode) {
-                    case AccumMode::RNE:
-                    DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::RZ:
-                    DenseamKernel_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::FP16RNE:
-                    DenseamKernel_fp16_accumulate<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::FP16RZ:
-                    DenseamKernel_fp16_accumulate_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::BF16RNE:
-                    DenseamKernel_bf16_accumulate<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::BF16RZ:
-                    DenseamKernel_bf16_accumulate_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    default:
-                    DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                }
-                break;
-            case FloatMode::FP16:
-                // use denseamkernel_5exp with lut for both forward pass
-                switch (accum_mode)
-                {
-                    case AccumMode::RNE:
-                    DenseamKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
-                    break;
-                    case AccumMode::RZ:
-                    DenseamKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
-                    break;
-                    default:
-                    DenseamKernel_lut_5exp<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
-                    break;
-                }
-                break;
-            case FloatMode::BF16:
-                // use DenseamKernel_lut with lut for both forward pass
-                switch (accum_mode)
-                {
-                        case AccumMode::RNE:
-                        DenseamKernel_lut<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
-                        break;
-                        case AccumMode::RZ:
-                        DenseamKernel_lut_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
-                        break;
-                        default:
-                        DenseamKernel_lut<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
-                        break;
-                }
-                break;
-            case FloatMode::FP32:
-                // use DenseamKernel for forward pass
-                
-                switch (accum_mode)
-                {
-                        case AccumMode::RNE:
-                        DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
-                        break;
-                        case AccumMode::RZ:
-                        DenseamKernel_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
-                        break;
-                        default:
-                        DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
-                        break;
-                }
+                quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, input_size);
+                quant_fp32_e4m3clipping_launcher<T>(d, weights, quant_weight, weight_size);
                 break;
             default:
                 break;
-
+            break;
         }
-    } else {
-        // using case for different float modes
-        // no lut all accurate
-        switch (mode){
-            case FloatMode::FP8E5M2:  
-            case FloatMode::FP8HYB:
-                switch (accum_mode) {
-                    case AccumMode::RNE:
-                    DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::RZ:
-                    DenseamKernel_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::FP16RNE:
-                    DenseamKernel_fp16_accumulate<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::FP16RZ:
-                    DenseamKernel_fp16_accumulate_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::BF16RNE:
-                    DenseamKernel_bf16_accumulate<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    case AccumMode::BF16RZ:
-                    DenseamKernel_bf16_accumulate_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                    default:
-                    DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(quant_input, quant_weight, batch, units, input_width, output);
-                    break;
-                }
-                break;
-            case FloatMode::FP16:
-                // use DenseamKernel_fp16 without lut for both forward pass
-                
-                switch (accum_mode)
-                {
-                    case AccumMode::RNE:
-                        DenseamKernel_fp16<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                    
-                        break;
-                    case AccumMode::RZ:
-                        DenseamKernel_fp16_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                    
-                        break;
-                    default:
-                        DenseamKernel_fp16<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                    
-                    break;
-                }
-                break;
-            case FloatMode::BF16:
-                // use DenseamKernel_bf16 without lut for both forward pass
-                
-                switch (accum_mode)
-                {
-                    case AccumMode::RNE:
-                        DenseamKernel_bf16<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                    
-                        break;
-                    case AccumMode::RZ:
-                        DenseamKernel_bf16_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                    
-                        break;
-                    default:
-                        DenseamKernel_fp16<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                    
-                    break;
-                }
-                break;
-            case FloatMode::FP32:
-                // use DenseamKernel for forward pass
-                
-                switch (accum_mode)
-                {
-                    case AccumMode::RNE:
-                        DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                   
-                        break;
-                    case AccumMode::RZ:
-                        DenseamKernel_rz<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                    
-                        break;
-                    default:
-                        DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);                    
-                        break;
-                }
-                break;
-            default:
-                DenseamKernel<T><<<gridsize, blocksize, 0, d.stream()>>>(inputs, weights, batch, units, input_width, output);
-                break;
-        }
+        input_data = quant_input;
+        weight_data = quant_weight;
     }
-    gpuErrchk( cudaPeekAtLastError() );
-    gpuErrchk( cudaDeviceSynchronize() );
+    // gemm
+    const size_t m = batch;
+    const size_t n = units;
+    const size_t k = input_width;
+    const size_t lda = k;
+    const size_t ldb = n;
+    const size_t ldc = n;
+    dim3 blockSize(16, 16, 1);
+    dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
+    GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, weight_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, false, false, accum_mode);
 }
 
 // Functor for weight gradients

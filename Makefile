@@ -24,7 +24,7 @@ CUDA_ARCH = -gencode arch=compute_61,code=sm_61  # Set to sm_61 for GTX 1080
 CUDA_CFLAGS += -g  -O2 -std=c++11 $(CUDA_ARCH) -Xcompiler -Wall -Xcompiler -fPIC  -Xcudafe --diag_suppress=esa_on_defaulted_function_ignored --expt-relaxed-constexpr
 CUDA_LDFLAGS = -L$(CUDA_LIB) -lcudart
 CONV_OBJ += $(CONV_CUDA_OBJ)
-DENSE_CUDA_OBJ = denseam_kernel.cu.o approx_mul_lut.cu.o quant.cu.o
+DENSE_CUDA_OBJ = denseam_kernel.cu.o gemm.cu.o approx_mul_lut.cu.o quant.cu.o 
 DENSE_OBJ += $(DENSE_CUDA_OBJ)
 MATMUL_CUDA_OBJ = matmulam_kernel.cu.o gemm.cu.o approx_mul_lut.cu.o quant.cu.o
 MATMUL_OBJ += $(MATMUL_CUDA_OBJ)
@@ -68,7 +68,7 @@ mul_inc_deps = cuda/AMsimulator.inl
 # cuda stuff
 quant.cu.o: cuda/quant.cu cuda/error.cuh cuda/fp8_conversion.cuh 
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@
-denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) cuda/fp8_conversion.cuh cuda/quant.cuh cuda/accumulate.cuh
+denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) cuda/fp8_conversion.cuh cuda/quant.cuh cuda/accumulate.cuh cuda/gemm_launcher.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS)  $(ADD_ROUNDING_CPPFLAG)   -c $< -o $@
 matmulam_kernel.cu.o: cuda/matmulam_kernel.cu cuda/error.cuh cuda/gemm.cuh cuda/quant.cuh cuda/accumulate.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@
