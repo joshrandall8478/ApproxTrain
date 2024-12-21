@@ -125,6 +125,7 @@ class denseam(Layer):
                bias_constraint=None,
                mant_mul_lut='',
                FPMode='FP32',
+               AccumMode='RNE',
                **kwargs):
     super(denseam, self).__init__(
         activity_regularizer=activity_regularizer, **kwargs)
@@ -146,6 +147,7 @@ class denseam(Layer):
     self.supports_masking = True
     self.mant_mul_lut = mant_mul_lut
     self.FPMode = FPMode
+    self.AccumMode = AccumMode
   def build(self, input_shape):
     dtype = dtypes.as_dtype(self.dtype or K.floatx())
     if not (dtype.is_floating or dtype.is_complex):
@@ -210,7 +212,7 @@ class denseam(Layer):
             self.kernel, ids, weights, combiner='sum')
       else:
         #outputs = gen_math_ops.MatMul(a=inputs, b=self.kernel)
-        outputs = amdense_module.denseam(inputs, self.kernel, self.mant_mul_lut, self.FPMode)
+        outputs = amdense_module.denseam(inputs, self.kernel, self.mant_mul_lut, self.FPMode, self.AccumMode)
    #     outputs = amdense_module.denseam(inputs, self.kernel)
     # Broadcast kernel to inputs.
     else:
@@ -254,11 +256,12 @@ class denseam(Layer):
         'kernel_constraint': constraints.serialize(self.kernel_constraint),
         'bias_constraint': constraints.serialize(self.bias_constraint),
         'mant_mul_lut': self.mant_mul_lut,
-        'FPMode': self.FPMode
+        'FPMode': self.FPMode,
+        'AccumMode': self.AccumMode
     })
     return config
 
 @ops.RegisterGradient("Denseam")
 def _dense_grad_cc(op, grad):
-    return amdense_module.denseam_grad(grad, op.inputs[0], op.inputs[1], mant_mul_lut=op.get_attr("mant_mul_lut"), FPMode=op.get_attr("FPMode")) 
+    return amdense_module.denseam_grad(grad, op.inputs[0], op.inputs[1], mant_mul_lut=op.get_attr("mant_mul_lut"), FPMode=op.get_attr("FPMode"), AccumMode=op.get_attr("AccumMode")) 
     #return amdense_module.denseam_grad(grad, op.inputs[0], op.inputs[1], op.get_attr("mant_mul_lut")) 

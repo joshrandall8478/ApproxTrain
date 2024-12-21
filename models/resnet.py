@@ -6,7 +6,7 @@ from tensorflow.keras.layers import Conv2D, BatchNormalization, ReLU, Add, Globa
 from python.keras.layers.am_convolutional import AMConv2D
 from python.keras.layers.amdenselayer import denseam
 
-def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=True, weight_decay=1e-4, batch_norm_params=None, tensorflow_original=False):
+def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=True, weight_decay=1e-4, batch_norm_params=None, tensorflow_original=False,AccumMode='RNE'):
 
     """Defines a single ResNet unit (block) without using class definitions."""
     if batch_norm_params is None:
@@ -29,14 +29,14 @@ def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=T
                                  use_bias=False, kernel_regularizer=kernel_regularizer)(x) \
                 if tensorflow_original else \
                 AMConv2D(filters, kernel_size=1, strides=stride, padding='same', use_bias= False, 
-                         mant_mul_lut=lut_file, FPMode=FPMode)(x)
+                         mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode)(x)
     
     # First Conv2D
     x = Conv2D(filters, kernel_size=3, strides=stride, padding='same',
                       use_bias=False, kernel_regularizer=kernel_regularizer)(x) \
         if tensorflow_original else \
         AMConv2D(filters, kernel_size=3, strides=stride, padding='same', use_bias= False,\
-                 kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode)(x)
+                 kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode)(x)
     
     # Second BatchNorm and ReLU
     x = BatchNormalization(**batch_norm_params)(x)
@@ -47,7 +47,7 @@ def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=T
                       use_bias=False, kernel_regularizer=kernel_regularizer)(x)\
         if tensorflow_original else \
         AMConv2D(filters, kernel_size=3, strides=1, padding='same', use_bias= False,\
-                    kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode)(x)
+                    kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode)(x)
     
     # Add shortcut connection
     if shortcut_connection:
@@ -55,7 +55,7 @@ def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=T
     
     return x
 
-def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, weight_decay=1e-4,tensorflow_original=False):
+def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, AccumMode, weight_decay=1e-4,tensorflow_original=False):
     """Builds the ResNet model using the Keras Functional API."""
     if num_layers not in (20, 32, 44, 56, 110, 1202):
         raise ValueError('num_layers must be one of 20, 32, 44, 56, 110, or 1202.')
@@ -73,24 +73,24 @@ def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, weight_
                       use_bias=False, kernel_regularizer=kernel_regularizer)(inputs)\
         if tensorflow_original else \
         AMConv2D(16, kernel_size=3, strides=1, padding='same', use_bias= False,\
-                 kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode)(inputs)
+                 kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode,AccumMode=AccumMode)(inputs)
     
     # First block
     for _ in range(num_units):
         x = resnet_unit(x, filters=16, stride=1, lut_file=lut_file, FPMode=FPMode, shortcut_connection=True,
-                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original)
+                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode)
     
     # Second block
     for i in range(num_units):
         stride = 2 if i == 0 else 1
         x = resnet_unit(x, filters=32, stride=stride, lut_file=lut_file, FPMode=FPMode, shortcut_connection=True,
-                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original)
+                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode)
     
     # Third block
     for i in range(num_units):
         stride = 2 if i == 0 else 1
         x = resnet_unit(x, filters=64, stride=stride, lut_file=lut_file, FPMode=FPMode, shortcut_connection=True,
-                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original)
+                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode)
     
     # Final BatchNorm and ReLU
     x = BatchNormalization(**batch_norm_params)(x)
@@ -104,12 +104,12 @@ def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, weight_
                            kernel_regularizer=kernel_regularizer)(x) \
         if tensorflow_original else \
         denseam(num_classes, activation='softmax', kernel_regularizer=kernel_regularizer,\
-                mant_mul_lut=lut_file, FPMode=FPMode)(x)
+                mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode)(x)
     
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
 
     return model
 
-def build_resnet_cifar(input_shape, num_classes, depth, lut_file, FPMode, tensorflow_original=False):
+def build_resnet_cifar(input_shape, num_classes, depth, lut_file, FPMode, AccumMode, tensorflow_original=False):
     """Helper function to build ResNet models for CIFAR datasets."""
-    return build_resnet(input_shape, num_classes, num_layers=depth, lut_file=lut_file, FPMode=FPMode, weight_decay=1e-4, tensorflow_original=tensorflow_original)
+    return build_resnet(input_shape, num_classes, num_layers=depth, lut_file=lut_file, FPMode=FPMode, AccumMode=AccumMode, weight_decay=1e-4, tensorflow_original=tensorflow_original)

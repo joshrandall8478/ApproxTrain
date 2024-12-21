@@ -434,6 +434,7 @@ REGISTER_OP("Convam")
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("mant_mul_lut: string = ''")
     .Attr("FPMode: string = 'FP32'")
+    .Attr("AccumMode: string = 'RNE'")
     .Attr(GetPaddingAttrString())
     .Attr(GetConvnetDataFormatAttrString())
     .SetShapeFn(::tensorflow::shape_inference::Conv2DShape);
@@ -448,7 +449,7 @@ struct ConvamFunctor<CPUDevice, T> {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             const T* im2col, const int padding,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter, AccumMode accum_mode
           ) {
 
     for (int batch_ = 0; batch_ < batch; ++batch_) {
@@ -503,20 +504,11 @@ public:
     // grab FPMode
     OP_REQUIRES_OK(context, context->GetAttr("FPMode", &FPMode_));
     // match FPMode to FloatMode
-    if(FPMode_ == "FP32"){
-        mode_ = FloatMode::FP32;
-    } else if(FPMode_ == "FP16"){
-        mode_ = FloatMode::FP16;
-    } else if(FPMode_ == "BF16"){
-        mode_ = FloatMode::BF16;
-    } else if(FPMode_ == "FP8E5M2"){
-        mode_ = FloatMode::FP8E5M2;
-    } else if(FPMode_ == "FP8HYB"){
-        mode_ = FloatMode::FP8HYB;
-    } else {
-        // raise error invalide mode
-        OP_REQUIRES(context, false, errors::InvalidArgument("Invalid FPMode"));
-    }
+    mode_ = StringToFloatMode(FPMode_);
+    // grab AccumMode
+    OP_REQUIRES_OK(context, context->GetAttr("AccumMode", &AccumMode_));
+    // match AccumMode to AccumMode
+    accum_mode_ = StringToAccumMode(AccumMode_);
   }
   void Compute(OpKernelContext* context) override {
     //  grab input
@@ -638,13 +630,16 @@ public:
             mul_lut_,
             mode_,
             quant_input_data,
-            quant_filter_data
+            quant_filter_data,
+            accum_mode_
             );
   }
   private:
   approx_mul_lut<Device> mul_lut_;
   FloatMode mode_;
   std::string FPMode_;
+  AccumMode accum_mode_;
+  std::string AccumMode_;
   Conv2DParameters params_;
   TF_DISALLOW_COPY_AND_ASSIGN(ConvamOp);
 };
@@ -683,7 +678,7 @@ struct ConvamFilterGradFunctor<CPUDevice, T>{
           const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad
+          T* output, approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad, AccumMode accum_mode
           ){
 
     for (int out_y = 0; out_y < filter_rows; ++out_y) {
@@ -747,6 +742,7 @@ REGISTER_OP("ConvamFilterGrad")
   .Attr("dilations: list(int) = [1, 1, 1, 1]")
   .Attr("mant_mul_lut: string = ''")
   .Attr("FPMode: string = 'FP32'")
+  .Attr("AccumMode: string = 'RNE'")
   .Attr(GetPaddingAttrString())
   .Attr(GetConvnetDataFormatAttrString())
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
@@ -799,20 +795,10 @@ public:
     OP_REQUIRES_OK(context, context->GetAttr("padding", &padding_));
     // grab FPMode and match to FloatMode
     OP_REQUIRES_OK(context, context->GetAttr("FPMode", &FPMode_));
-    if(FPMode_ == "FP32"){
-        mode_ = FloatMode::FP32;
-    } else if(FPMode_ == "FP16"){
-        mode_ = FloatMode::FP16;
-    } else if(FPMode_ == "BF16"){
-        mode_ = FloatMode::BF16;
-    } else if(FPMode_ == "FP8E5M2"){
-        mode_ = FloatMode::FP8E5M2;
-    } else if(FPMode_ == "FP8HYB"){
-        mode_ = FloatMode::FP8HYB;
-    } else {
-        // raise error invalide mode
-        OP_REQUIRES(context, false, errors::InvalidArgument("Invalid FPMode"));
-    }
+    mode_ = StringToFloatMode(FPMode_);
+    // grab AccumMode and match to AccumMode
+    OP_REQUIRES_OK(context, context->GetAttr("AccumMode", &AccumMode_));
+    accum_mode_ = StringToAccumMode(AccumMode_);
   }
 
   void Compute(OpKernelContext* context) override{
@@ -955,12 +941,15 @@ public:
             mul_lut_,
             mode_,
             quant_input_data,
-            quant_grad_data
+            quant_grad_data,
+            accum_mode_
             );
   }
   private:
   FloatMode mode_;
   std::string FPMode_;
+  AccumMode accum_mode_;
+  std::string AccumMode_;
   approx_mul_lut<Device> mul_lut_;
   std::vector<int32> dilations_;
   std::vector<int32> strides_;
@@ -1001,7 +990,7 @@ struct ConvamInputGradFunctor<CPUDevice, T> {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols,
-          approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad
+          approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad, AccumMode accum_mode
           ){
     for (int ibatch = 0; ibatch < batch; ++ibatch) {
         for (int out_y = 0; out_y < input_rows; ++out_y) {
@@ -1063,6 +1052,7 @@ REGISTER_OP("ConvamInputGrad")
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .Attr("mant_mul_lut: string = ''")
     .Attr("FPMode: string = 'FP32'")
+    .Attr("AccumMode: string = 'RNE'")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
       ::tensorflow::shape_inference::ShapeHandle s;
       TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
@@ -1112,20 +1102,10 @@ class ConvamInputGradOp: public OpKernel {
        OP_REQUIRES_OK(context, context->GetAttr("padding", &padding_));
        // grab FPMode and match to FloatMode
         OP_REQUIRES_OK(context, context->GetAttr("FPMode", &FPMode_));
-        if(FPMode_ == "FP32"){
-            mode_ = FloatMode::FP32;
-        } else if(FPMode_ == "FP16"){
-            mode_ = FloatMode::FP16;
-        } else if(FPMode_ == "BF16"){
-            mode_ = FloatMode::BF16;
-        } else if(FPMode_ == "FP8E5M2"){
-            mode_ = FloatMode::FP8E5M2;
-        } else if(FPMode_ == "FP8HYB"){
-            mode_ = FloatMode::FP8HYB;
-        } else {
-            // raise error invalide mode
-            OP_REQUIRES(context, false, errors::InvalidArgument("Invalid FPMode"));
-        }
+        mode_ = StringToFloatMode(FPMode_);
+        // grab AccumMode and match to AccumMode
+        OP_REQUIRES_OK(context, context->GetAttr("AccumMode", &AccumMode_));
+        accum_mode_ = StringToAccumMode(AccumMode_);
      }
 
      void Compute(OpKernelContext* context) override {
@@ -1270,12 +1250,15 @@ class ConvamInputGradOp: public OpKernel {
                 mul_lut_,
                 mode_,
                 quant_filter_data,
-                quant_grad_data
+                quant_grad_data,
+                accum_mode_
                 );
      }
   private:
   FloatMode mode_;
   std::string FPMode_;
+  AccumMode accum_mode_;
+  std::string AccumMode_;
   approx_mul_lut<Device> mul_lut_;
   std::vector<int32> dilations_;
   std::vector<int32> strides_;

@@ -136,6 +136,7 @@ class AMConv(Layer):
                conv_op=None,
                mant_mul_lut='', 
                FPMode='FP32',
+               AccumMode='RNE',
                **kwargs):
     super(AMConv, self).__init__(
         trainable=trainable,
@@ -177,6 +178,7 @@ class AMConv(Layer):
     self.data_format, self.rank + 2)
     self.mant_mul_lut = mant_mul_lut
     self.FPMode = FPMode
+    self.AccumMode = AccumMode
     #print(self.mant_mul_lut," lvl 1")
 
   def _validate_init(self):
@@ -256,6 +258,7 @@ class AMConv(Layer):
         data_format=self._tf_data_format,
         mant_mul_lut=self.mant_mul_lut,
         FPMode=self.FPMode,
+        AccumMode=self.AccumMode,
         name=tf_op_name)
     self.built = True
 
@@ -360,13 +363,15 @@ class AMConv(Layer):
         'mant_mul_lut':
             self.mant_mul_lut,
         'FPMode':
-            self.FPMode
+            self.FPMode,
+        'AccumMode':
+            self.AccumMode
     }
     base_config = super(AMConv, self).get_config()
     return dict(list(base_config.items()) + list(config.items()))
   @classmethod
-  def from_config(cls, config, mant_mul_lut=None, FPMode=None):
-        return cls(**config, mant_mul_lut=mant_mul_lut, FPMode=FPMode)
+  def from_config(cls, config, mant_mul_lut=None, FPMode=None, AccumMode=None):
+        return cls(**config, mant_mul_lut=mant_mul_lut, FPMode=FPMode, AccumMode=AccumMode)
   def _compute_causal_padding(self, inputs):
     """Calculates padding for 'causal' option for 1-d conv layers."""
     left_pad = self.dilation_rate[0] * (self.kernel_size[0] - 1)
@@ -543,6 +548,7 @@ class AMConv2D(AMConv):
                bias_constraint=None,
                mant_mul_lut='', 
                FPMode='FP32',
+               AccumMode='RNE',
                **kwargs):
     super(AMConv2D, self).__init__(
         rank=2,
@@ -564,6 +570,7 @@ class AMConv2D(AMConv):
         bias_constraint=constraints.get(bias_constraint),
         mant_mul_lut=mant_mul_lut,
         FPMode=FPMode,
+        AccumMode=AccumMode,
         **kwargs)
       
 

@@ -47,57 +47,161 @@ void GEMM_LAUNCHER(
     approx_mul_lut<GPUDevice>& mul_lut,
     FloatMode mode,
     bool forward_pass,
-    bool input_grad
+    bool input_grad,
+    AccumMode accum_mode
 ){
 
     /* Note: FP8 quantization happens prior to GEMM operations, see cuda_kernel.cu */
     if (mul_lut.is_lut()){
         // using case for different float modes
         switch (mode){
-            case FloatMode::FP8E5M2:  
-                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                break;
+            case FloatMode::FP8E5M2:
             case FloatMode::FP8HYB:
-                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                switch (accum_mode) {
+                    case AccumMode::RNE:
+                    gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::RZ:
+                    gemm_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::FP16RNE:
+                    gemm_fp16_accumulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::FP16RZ:
+                    gemm_fp16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::BF16RNE:
+                    gemm_bf16_accumulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::BF16RZ:
+                    gemm_bf16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    default:
+                    gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                }
                 break;
             case FloatMode::FP16:
                 // use gemm_5exp with lut for both forward and backward pass
                 // TODO: add actual implementation
-                gemm_5exp<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
+                //exit
+                
+                switch (accum_mode)
+                {
+                    case AccumMode::RNE:
+                    gemm_5exp<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
+                    break;
+                    case AccumMode::RZ:
+                    gemm_5exp<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
+                    break;
+                    default:
+                    gemm_5exp<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
+                    break;
+                }
                 break;
             case FloatMode::BF16:
                 // use gemm with lut for both forward and backward pass
                 // the gemm supports 8-bit exponents, mantissa from 0 to 7bits, where 7bit is the bfloat16
-                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
+                switch (accum_mode)
+                {
+                        case AccumMode::RNE:
+                        gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
+                        break;
+                        case AccumMode::RZ:
+                        gemm_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
+                        break;
+                        default:
+                        gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, mul_lut.get_mant_mul_lut_text_(), mul_lut.get_mant_mask_(), mul_lut.get_a_shift_(), mul_lut.get_b_shift_(), mul_lut.get_mant_width_());
+                        break;
+                }
                 break;
             case FloatMode::FP32:
                 // use gemm no lut is supported, if you really want to use some approximation, a behavior model is required that is C/C++ based and can be used in the kernel
-                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                switch (accum_mode)
+                {
+                        case AccumMode::RNE:
+                        gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        break;
+                        case AccumMode::RZ:
+                        gemm_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        break;
+                        default:
+                        gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        break;
+                }
                 break;
             default:
                 break;
         }
     } else {
-        // using case for different float modes
-        // no lut all accurate
         switch (mode){
-            case FloatMode::FP8E5M2:  
-                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                break;
+            case FloatMode::FP8E5M2:
             case FloatMode::FP8HYB:
-                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                switch (accum_mode) {
+                    case AccumMode::RNE:
+                    gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::RZ:
+                    gemm_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::FP16RNE:
+                    gemm_fp16_accumulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::FP16RZ:
+                    gemm_fp16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::BF16RNE:
+                    gemm_bf16_accumulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::BF16RZ:
+                    gemm_bf16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    default:
+                    gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                }
                 break;
             case FloatMode::FP16:
-                // use gemm_fp16 without lut for both forward and backward pass
-                gemm_fp16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                switch (accum_mode)
+                {
+                    case AccumMode::RNE:
+                    gemm_fp16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::RZ:
+                    gemm_fp16_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    default:
+                    gemm_fp16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                }
                 break;
             case FloatMode::BF16:
-                // use gemm_bf16 without lut for both forward and backward pass
-                gemm_bf16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                switch (accum_mode)
+                {
+                    case AccumMode::RNE:
+                    gemm_bf16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::RZ:
+                    gemm_bf16_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    default:
+                    gemm_bf16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                }
                 break;
             case FloatMode::FP32:
-                // use gemm without lut for both forward and backward pass
-                gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                switch (accum_mode)
+                {
+                    case AccumMode::RNE:
+                    gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    case AccumMode::RZ:
+                    gemm_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                    default:
+                    gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    break;
+                }
                 break;
             default:
                 break;
@@ -107,41 +211,5 @@ void GEMM_LAUNCHER(
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchk( cudaDeviceSynchronize() );
 }
-// initialize the template
 
-// template void GEMM_LAUNCHER<float>(
-//     const GPUDevice &d,
-//     size_t m,
-//     size_t n,
-//     size_t k,
-//     const float* a,
-//     size_t lda,
-//     const float* b,
-//     size_t ldb,
-//     float* c,
-//     size_t ldc,
-//     dim3 blockSize,
-//     dim3 gridSize,
-//     approx_mul_lut<GPUDevice>& mul_lut,
-//     FloatMode mode,
-//     bool forward_pass
-// );
-// // initialize the template
-// template void GEMM_LAUNCHER<int32>(
-//     const GPUDevice &d,
-//     size_t m,
-//     size_t n,
-//     size_t k,
-//     const int32* a,
-//     size_t lda,
-//     const int32* b,
-//     size_t ldb,
-//     int32* c,
-//     size_t ldc,
-//     dim3 blockSize,
-//     dim3 gridSize,
-//     approx_mul_lut<GPUDevice>& mul_lut,
-//     FloatMode mode,
-//     bool forward_pass
-// );
 #endif  // GEMM_LAUNCHER_CUH

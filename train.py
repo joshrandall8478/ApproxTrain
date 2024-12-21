@@ -50,7 +50,7 @@ def main():
     parser.add_argument("--LUT", type=str, help="Path to the LUT file")
     parser.add_argument("--EPOCH", type=int, default=200, help="Number of epochs")
     parser.add_argument("--EARLYSTOPPING", action='store_true', help="Enable early stopping")
-    parser.add_argument("--ROUNDING", type=str, required=True, choices=['RNE','RTZ'], help="Rounding mode (you have to recompile ApproxTrain if you change the rounding mode)")
+    parser.add_argument("--ROUNDING", type=str, required=True, choices=['RNE','RZ','FP16RNE','FP16RZ', 'BF16RNE', 'BF16RZ'], help="Rounding mode (you have to recompile ApproxTrain if you change the rounding mode)")
     # Add a new argument to specify the FPMode
     parser.add_argument("--FPMode", type=str, required=True, choices=['FP32', 'FP16', 'BF16', 'FP8E5M2', 'FP8HYB'], help="FPMode to use for training")
     parser.add_argument("--MODEL", type=str, required=True, choices=['lenet300100', 'lenet5', 'resnet20', 'resnet32', 'resnet44', 'resnet56', 'resnet110', 'resnet1202'], help="Model architecture to train")
@@ -78,14 +78,14 @@ def main():
     with strategy.scope():
         if args.MODEL.startswith('lenet'):
             if args.MODEL == 'lenet5' or args.MODEL == 'lenet300100':
-                model = build_lenet(args.MODEL, input_shape, num_classes, lut_file, args.FPMode)
+                model = build_lenet(args.MODEL, input_shape, num_classes, lut_file, args.FPMode, rnd)
             else:
                 raise ValueError(f"Unsupported LeNet model: {args.MODEL}")
             optimizer = tf.keras.optimizers.Adam()
             loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
         elif args.MODEL.startswith('resnet'):
             depth = int(args.MODEL.replace('resnet', ''))
-            model = build_resnet_cifar(input_shape=input_shape, num_classes=num_classes, depth=depth, lut_file=lut_file, FPMode=args.FPMode)
+            model = build_resnet_cifar(input_shape=input_shape, num_classes=num_classes, depth=depth, lut_file=lut_file, FPMode=args.FPMode, AccumMode=rnd)
             # Use SGD with momentum for ResNet
             # learning_rate = 0.1
             learning_rate = tf.keras.optimizers.schedules.PiecewiseConstantDecay(\
@@ -103,7 +103,12 @@ def main():
     if args.TEST:
         # load the model specified by the user
         model.load_weights(f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}.h5")
-        model.evaluate(ds_test)
+        if args.MODEL == 'lenet5' or args.MODEL == 'lenet300100':
+            test_loss, test_accuracy = model.evaluate(ds_test, steps=ds_test.n // ds_test.batch_size)
+            print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
+        else:
+            test_loss, test_accuracy = model.evaluate(ds_val, steps=ds_val.n // ds_val.batch_size)
+        print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
         return
 
     # Directories

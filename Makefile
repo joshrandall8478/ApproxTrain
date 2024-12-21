@@ -30,11 +30,6 @@ MATMUL_CUDA_OBJ = matmulam_kernel.cu.o gemm.cu.o approx_mul_lut.cu.o quant.cu.o
 MATMUL_OBJ += $(MATMUL_CUDA_OBJ)
 
 
-ifneq ($(ADD_ROUNDING),)
-	ADD_ROUNDING_CPPFLAG = -D$(ADD_ROUNDING)=1
-endif
-
-
 .PHONY: clean test
 
 all: $(CONV_BINARY) $(DENSE_BINARY) $(MATMUL_BINARY)
@@ -73,14 +68,14 @@ mul_inc_deps = cuda/AMsimulator.inl
 # cuda stuff
 quant.cu.o: cuda/quant.cu cuda/error.cuh cuda/fp8_conversion.cuh 
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@
-denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) cuda/fp8_conversion.cuh cuda/quant.cuh
+denseam_kernel.cu.o : cuda/denseam_kernel.cu cuda/error.cuh $(mul_inc_deps) cuda/fp8_conversion.cuh cuda/quant.cuh cuda/accumulate.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS)  $(ADD_ROUNDING_CPPFLAG)   -c $< -o $@
-matmulam_kernel.cu.o: cuda/matmulam_kernel.cu cuda/error.cuh cuda/gemm.cuh cuda/quant.cuh
+matmulam_kernel.cu.o: cuda/matmulam_kernel.cu cuda/error.cuh cuda/gemm.cuh cuda/quant.cuh cuda/accumulate.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) -c $< -o $@
-cuda_kernel.cu.o: cuda/cuda_kernel.cu cuda/gpu_kernel_helper.h cuda/error.cuh cuda/gemm.cuh cuda/reverseNswapdim23.cuh cuda/gemm_launcher.cuh cuda/quant.cuh
+cuda_kernel.cu.o: cuda/cuda_kernel.cu cuda/gpu_kernel_helper.h cuda/error.cuh cuda/gemm.cuh cuda/reverseNswapdim23.cuh cuda/gemm_launcher.cuh cuda/quant.cuh cuda/accumulate.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS) --expt-relaxed-constexpr -c $< -o $@
 
-gemm.cu.o: cuda/gemm.cu $(mul_inc_deps) cuda/fp8_conversion.cuh
+gemm.cu.o: cuda/gemm.cu $(mul_inc_deps) cuda/fp8_conversion.cuh cuda/accumulate.cuh
 	$(NVCC) -x cu $(CUDA_CFLAGS) $(CPPFLAGS)  $(ADD_ROUNDING_CPPFLAG)   -c $< -o $@
 
 reverseNswapdim23.cu.o: cuda/reverseNswapdim23.cu

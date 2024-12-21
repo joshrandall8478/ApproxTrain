@@ -5,37 +5,293 @@
 #include "tensorflow/core/framework/types.h"
 #include <cuda_fp16.h>
 #include "fp8_conversion.cuh"
+#include "accumulate.cuh"
 using namespace tensorflow;
 
 
 
 
 #define TILE_DIM 16
-/*
-    Goal is to setup emulation with (FP16,FP32), (BF16,FP32), (E4M3, FP32), (E5M2, FP32),
-    where the FP32 is accumulation type and others are the input types (multiplications type).
-*/
-
-#ifdef RTZ
-    #define fp32_add(a,b) __fadd_rz((a), (b));
-#else
-    #define fp32_add(a,b) ((a)+(b));
-#endif
-__device__ __forceinline__ float bf16_add_rz(float val, float b) {
-    float ret = __fadd_rz(val, b);
-    return __uint_as_float(__float_as_uint(ret) & 0xffff0000);
-}
-
-__device__ __forceinline__ float half_add_rz(float val, float b) {
-    float ret = __fadd_rz(val, b);
-    return __half2float(__float2half_rz(ret));
-}
-
-/*
-    The following is for half precision that accumulate in FP32
-*/
-
 /* start of new implementation*/
+/* gemm bf16 accumulate */
+template <typename T>
+__global__ void gemm_bf16_accumulate(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc
+   )
+{
+    T value(0);
+    
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+    
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+    
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+    
+         if (i*TILE_DIM + threadIdx.x < k && Row < m){
+              As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+         }
+         else{
+              As[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         if (i*TILE_DIM + threadIdx.y < k && Col < n){
+              Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+         }
+         else{
+              Bs[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         __syncthreads();
+    
+         for (int n = 0; n < TILE_DIM; ++n){
+               value = bf16_add(value, As[threadIdx.y][n]*Bs[n][threadIdx.x]);
+         }
+    
+         __syncthreads();
+    }
+    
+    if (Row < m && Col < n) {
+         c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+template __global__ void gemm_bf16_accumulate<float>(size_t m, size_t n, size_t k,
+   const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc
+   );
+template __global__ void gemm_bf16_accumulate<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc
+);
+/* gemm bf16 accumulate rtz */
+template <typename T>
+__global__ void gemm_bf16_accumulate_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc
+   )
+{
+    T value(0);
+    
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+    
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+    
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+    
+         if (i*TILE_DIM + threadIdx.x < k && Row < m){
+              As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+         }
+         else{
+              As[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         if (i*TILE_DIM + threadIdx.y < k && Col < n){
+              Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+         }
+         else{
+              Bs[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         __syncthreads();
+    
+         for (int n = 0; n < TILE_DIM; ++n){
+               value = bf16_add_rz(value, As[threadIdx.y][n]*Bs[n][threadIdx.x]);
+         }
+    
+         __syncthreads();
+    }
+    
+    if (Row < m && Col < n) {
+         c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+template __global__ void gemm_bf16_accumulate_rz<float>(size_t m, size_t n, size_t k,
+   const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc
+   );
+template __global__ void gemm_bf16_accumulate_rz<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc
+     );
+
+template <typename T>
+__global__ void gemm_fp16_accumulate(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc
+   )
+{
+    float value(0);
+    
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+    
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+    
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+    
+         if (i*TILE_DIM + threadIdx.x < k && Row < m){
+              As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+         }
+         else{
+              As[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         if (i*TILE_DIM + threadIdx.y < k && Col < n){
+              Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+         }
+         else{
+              Bs[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         __syncthreads();
+    
+         for (int n = 0; n < TILE_DIM; ++n){
+            // Accumulate the result
+            value = half_add(value, As[threadIdx.y][n]*Bs[n][threadIdx.x]);
+         }
+    
+         __syncthreads();
+    }
+    
+    if (Row < m && Col < n) {
+         c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+template __global__ void gemm_fp16_accumulate<float>(size_t m, size_t n, size_t k,
+   const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc
+   );
+template __global__ void gemm_fp16_accumulate<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int *c, size_t ldc
+     );
+// #define TRUNK_DIM 32
+// template <typename T>
+// __global__ void gemm_fp16_accumulate_rz(
+//     size_t m, size_t n, size_t k,
+//     const T * a, size_t lda,
+//     const T * b, size_t ldb,
+//     T * c, size_t ldc
+// )
+// {
+//     // Thread's output coordinates
+//     int Row = blockIdx.y * TRUNK_DIM + threadIdx.y;
+//     int Col = blockIdx.x * TRUNK_DIM + threadIdx.x;
+
+//     // Accumulator for the final output element
+//     T value = T(0);
+
+//     // Shared memory tiles for A and B
+//     __shared__ T As[TRUNK_DIM][TRUNK_DIM];
+//     __shared__ T Bs[TRUNK_DIM][TRUNK_DIM];
+
+//     // Number of tiles along the K dimension
+//     int numTiles = (k + TRUNK_DIM - 1) / TRUNK_DIM;
+
+//     for (int tileIdx = 0; tileIdx < numTiles; ++tileIdx)
+//     {
+//         // Load tile from A
+//         int A_col = tileIdx * TRUNK_DIM + threadIdx.x;
+//         if ((Row < m) && (A_col < k)) {
+//             As[threadIdx.y][threadIdx.x] = a[Row * lda + A_col];
+//         } else {
+//             As[threadIdx.y][threadIdx.x] = T(0);
+//         }
+
+//         // Load tile from B
+//         int B_row = tileIdx * TRUNK_DIM + threadIdx.y;
+//         if ((Col < n) && (B_row < k)) {
+//             Bs[threadIdx.y][threadIdx.x] = b[B_row * ldb + Col];
+//         } else {
+//             Bs[threadIdx.y][threadIdx.x] = T(0);
+//         }
+
+//         __syncthreads();
+
+//         // Local tile accumulator for this iteration
+//         T tileSum = T(0);
+
+//         // Sum partial products for the current tile
+//         #pragma unroll
+//         for (int idx = 0; idx < TRUNK_DIM; ++idx) {
+//             tileSum += As[threadIdx.y][idx] * Bs[idx][threadIdx.x];
+//         }
+
+//         // Add this tile's contribution to the final value
+//         value += tileSum;
+
+//         __syncthreads();
+//     }
+
+//     // Write final result (Row, Col) if within matrix bounds
+//     if (Row < m && Col < n) {
+//         c[Row * ldc + Col] = value;
+//     }
+// }
+
+/* gemm fp16 accumulate */
+template <typename T>
+__global__ void gemm_fp16_accumulate_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc
+   )
+{
+    T value(0);
+    
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+    
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+    
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+    
+         if (i*TILE_DIM + threadIdx.x < k && Row < m){
+              As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+         }
+         else{
+              As[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         if (i*TILE_DIM + threadIdx.y < k && Col < n){
+              Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+         }
+         else{
+              Bs[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         __syncthreads();
+
+
+         for (int n = 0; n < TILE_DIM; ++n){
+          // trunk accumulation (TILE_DIM)
+          // tileSum = half_add_rz(tileSum, As[threadIdx.y][n]*Bs[n][threadIdx.x]);
+          value = half_add_rz(value, As[threadIdx.y][n]*Bs[n][threadIdx.x]);
+
+
+         }
+          // value = half_add_rz(tileSum, value);
+
+         __syncthreads();
+    }
+
+    if (Row < m && Col < n) {
+         c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+template __global__ void gemm_fp16_accumulate_rz<float>(size_t m, size_t n, size_t k,
+   const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc
+   );
+template __global__ void gemm_fp16_accumulate_rz<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc
+     );
 /* gemm non-lut fp32 */
 template <typename T>
 __global__ void gemm(size_t m, size_t n, size_t k,
@@ -95,6 +351,59 @@ template __global__ void gemm<int32>(size_t m, size_t n, size_t k,
    int32 *c, size_t ldc
    );
 
+template <typename T>
+__global__ void gemm_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc
+   )
+{
+    T value(0);
+    
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+    
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+    
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+    
+         if (i*TILE_DIM + threadIdx.x < k && Row < m){
+              As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+         }
+         else{
+              As[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         if (i*TILE_DIM + threadIdx.y < k && Col < n){
+              Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+         }
+         else{
+              Bs[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         __syncthreads();
+    
+         for (int n = 0; n < TILE_DIM; ++n){
+            // Accumulate the result
+            T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+            value = fp32_add_rz(value, mul);
+         }
+    
+         __syncthreads();
+    }
+    
+    if (Row < m && Col < n) {
+         c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+template __global__ void gemm_rz<float>(size_t m, size_t n, size_t k,
+   const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc
+   );
+template __global__ void gemm_rz<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc
+     );
 /* gemm non-lut bfloat16*/
 // clip the values to bf16 then convert it back to fp32 (truncation)
 __device__ __forceinline__ float clip_bf16(float a) {
@@ -156,6 +465,59 @@ template __global__ void gemm_bf16<int32>(size_t m, size_t n, size_t k,
    int32 *c, size_t ldc
    );
 
+template <typename T>
+__global__ void gemm_bf16_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc
+   )
+{
+    T value(0);
+    
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+    
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+    
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+    
+         if (i*TILE_DIM + threadIdx.x < k && Row < m){
+              As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+         }
+         else{
+              As[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         if (i*TILE_DIM + threadIdx.y < k && Col < n){
+              Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+         }
+         else{
+              Bs[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         __syncthreads();
+    
+         for (int n = 0; n < TILE_DIM; ++n){
+            T mul = clip_bf16(As[threadIdx.y][n])*clip_bf16(Bs[n][threadIdx.x]);
+            value = fp32_add_rz(value, mul);
+         }
+    
+         __syncthreads();
+    }
+    
+    if (Row < m && Col < n) {
+         c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+
+template  __global__ void gemm_bf16_rz<float>(size_t m, size_t n, size_t k,
+   const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc
+   );
+template  __global__ void gemm_bf16_rz<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc
+     );
 
 /* gemm non-lut fp16*/
 // clip the values to fp16 then convert it back to fp32 (truncation)
@@ -218,7 +580,59 @@ template __global__ void gemm_fp16<int32>(size_t m, size_t n, size_t k,
    int32 *c, size_t ldc
    );
 
-
+// implement gemm_fp16_rz
+template <typename T>
+__global__ void gemm_fp16_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc
+   )
+{
+    T value(0);
+    
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+    
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+    
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+    
+         if (i*TILE_DIM + threadIdx.x < k && Row < m){
+              As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+         }
+         else{
+              As[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         if (i*TILE_DIM + threadIdx.y < k && Col < n){
+              Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+         }
+         else{
+              Bs[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         __syncthreads();
+    
+         for (int n = 0; n < TILE_DIM; ++n){
+            T mul = clip_fp16(As[threadIdx.y][n])*clip_fp16(Bs[n][threadIdx.x]);
+            value = fp32_add_rz(value, mul);
+         }
+    
+         __syncthreads();
+    }
+    
+    if (Row < m && Col < n) {
+         c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+template __global__ void gemm_fp16_rz<float>(size_t m, size_t n, size_t k,
+   const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc
+   );
+template __global__ void gemm_fp16_rz<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc
+     );
 /* lut implementation */
 /* gemm lut 8-bit exponents typed e.g. Bfloat16*/
 #include "AMsimulator.inl"
@@ -280,7 +694,63 @@ template __global__ void gemm<int32>(size_t m, size_t n, size_t k,
    int32 *c, size_t ldc, cudaTextureObject_t mant_lut,
    uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth
    );
-
+// lut rz
+template <typename T>
+__global__ void gemm_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, cudaTextureObject_t mant_lut,
+   uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth
+   ){
+    T value(0);
+    
+    int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+    int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+    
+    __shared__ T As[TILE_DIM][TILE_DIM];
+    __shared__ T Bs[TILE_DIM][TILE_DIM];
+    
+    for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+    
+         if (i*TILE_DIM + threadIdx.x < k && Row < m){
+              As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+         }
+         else{
+              As[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         if (i*TILE_DIM + threadIdx.y < k && Col < n){
+              Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+         }
+         else{
+              Bs[threadIdx.y][threadIdx.x] = T(0);
+         }
+    
+         __syncthreads();
+    
+         for (int n = 0; n < TILE_DIM; ++n){
+            // use am simulator
+            T mul = AMsimulator(As[threadIdx.y][n], Bs[n][threadIdx.x], mant_lut, mant_mask, a_shift, b_shift, mant_bitwidth);
+            // Accumulate the result
+            value = fp32_add_rz(value, mul);
+         }
+    
+         __syncthreads();
+    }
+    
+    if (Row < m && Col < n) {
+         c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+    }
+}
+template __global__ void gemm_rz<float>(size_t m, size_t n, size_t k,
+   const float *a, size_t lda, const float *b, size_t ldb,
+   float *c, size_t ldc, cudaTextureObject_t mant_lut,
+   uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth
+   );
+template __global__ void gemm_rz<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc, cudaTextureObject_t mant_lut,
+     uint32_t mant_mask, uint8_t a_shift, uint8_t b_shift, uint8_t mant_bitwidth
+     );
 // gemm lut 5-bit exponents typed e.g. FP16
 // this is a dummy implementation
 template <typename T>
