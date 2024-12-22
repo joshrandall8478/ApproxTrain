@@ -435,6 +435,9 @@ REGISTER_OP("Convam")
     .Attr("mant_mul_lut: string = ''")
     .Attr("FPMode: string = 'FP32'")
     .Attr("AccumMode: string = 'RNE'")
+    .Attr("trunk_size: int = 0")
+    .Attr("e4m3_exponent_bias: int = 7")
+    .Attr("e5m2_exponent_bias: int = 31")
     .Attr(GetPaddingAttrString())
     .Attr(GetConvnetDataFormatAttrString())
     .SetShapeFn(::tensorflow::shape_inference::Conv2DShape);
@@ -449,7 +452,7 @@ struct ConvamFunctor<CPUDevice, T> {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             const T* im2col, const int padding,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter, AccumMode accum_mode
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter, AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
           ) {
 
     for (int batch_ = 0; batch_ < batch; ++batch_) {
@@ -509,6 +512,10 @@ public:
     OP_REQUIRES_OK(context, context->GetAttr("AccumMode", &AccumMode_));
     // match AccumMode to AccumMode
     accum_mode_ = StringToAccumMode(AccumMode_);
+    // get trunk_size, e4m3_exponent_bias, and e5m2_exponent_bias
+    OP_REQUIRES_OK(context, context->GetAttr("trunk_size", &trunk_size));
+    OP_REQUIRES_OK(context, context->GetAttr("e4m3_exponent_bias", &e4m3_exponent_bias));
+    OP_REQUIRES_OK(context, context->GetAttr("e5m2_exponent_bias", &e5m2_exponent_bias));
   }
   void Compute(OpKernelContext* context) override {
     //  grab input
@@ -631,10 +638,16 @@ public:
             mode_,
             quant_input_data,
             quant_filter_data,
-            accum_mode_
+            accum_mode_,
+            static_cast<size_t>(trunk_size),
+            static_cast<uint8_t>(e4m3_exponent_bias),
+            static_cast<uint8_t>(e5m2_exponent_bias)
             );
   }
   private:
+  int trunk_size = 0;
+  int e4m3_exponent_bias = 7;
+  int e5m2_exponent_bias = 31;
   approx_mul_lut<Device> mul_lut_;
   FloatMode mode_;
   std::string FPMode_;
@@ -678,7 +691,7 @@ struct ConvamFilterGradFunctor<CPUDevice, T>{
           const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad, AccumMode accum_mode
+          T* output, approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad, AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
           ){
 
     for (int out_y = 0; out_y < filter_rows; ++out_y) {
@@ -743,6 +756,9 @@ REGISTER_OP("ConvamFilterGrad")
   .Attr("mant_mul_lut: string = ''")
   .Attr("FPMode: string = 'FP32'")
   .Attr("AccumMode: string = 'RNE'")
+  .Attr("trunk_size: int = 0")
+  .Attr("e4m3_exponent_bias: int = 7")
+  .Attr("e5m2_exponent_bias: int = 31")
   .Attr(GetPaddingAttrString())
   .Attr(GetConvnetDataFormatAttrString())
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
@@ -799,6 +815,10 @@ public:
     // grab AccumMode and match to AccumMode
     OP_REQUIRES_OK(context, context->GetAttr("AccumMode", &AccumMode_));
     accum_mode_ = StringToAccumMode(AccumMode_);
+    // get trunk_size, e4m3_exponent_bias, and e5m2_exponent_bias
+    OP_REQUIRES_OK(context, context->GetAttr("trunk_size", &trunk_size));
+    OP_REQUIRES_OK(context, context->GetAttr("e4m3_exponent_bias", &e4m3_exponent_bias));
+    OP_REQUIRES_OK(context, context->GetAttr("e5m2_exponent_bias", &e5m2_exponent_bias));
   }
 
   void Compute(OpKernelContext* context) override{
@@ -942,10 +962,16 @@ public:
             mode_,
             quant_input_data,
             quant_grad_data,
-            accum_mode_
+            accum_mode_,
+            static_cast<size_t>(trunk_size),
+            static_cast<uint8_t>(e4m3_exponent_bias),
+            static_cast<uint8_t>(e5m2_exponent_bias)
             );
   }
   private:
+  int trunk_size = 0;
+  int e4m3_exponent_bias = 7;
+  int e5m2_exponent_bias = 31;
   FloatMode mode_;
   std::string FPMode_;
   AccumMode accum_mode_;
@@ -990,7 +1016,7 @@ struct ConvamInputGradFunctor<CPUDevice, T> {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols,
-          approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad, AccumMode accum_mode
+          approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad, AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
           ){
     for (int ibatch = 0; ibatch < batch; ++ibatch) {
         for (int out_y = 0; out_y < input_rows; ++out_y) {
@@ -1053,6 +1079,9 @@ REGISTER_OP("ConvamInputGrad")
     .Attr("mant_mul_lut: string = ''")
     .Attr("FPMode: string = 'FP32'")
     .Attr("AccumMode: string = 'RNE'")
+    .Attr("trunk_size: int = 0")
+    .Attr("e4m3_exponent_bias: int = 7")
+    .Attr("e5m2_exponent_bias: int = 31")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
       ::tensorflow::shape_inference::ShapeHandle s;
       TF_RETURN_IF_ERROR(c->MakeShapeFromShapeTensor(0, &s));
@@ -1106,6 +1135,10 @@ class ConvamInputGradOp: public OpKernel {
         // grab AccumMode and match to AccumMode
         OP_REQUIRES_OK(context, context->GetAttr("AccumMode", &AccumMode_));
         accum_mode_ = StringToAccumMode(AccumMode_);
+        // get trunk_size, e4m3_exponent_bias, and e5m2_exponent_bias
+    OP_REQUIRES_OK(context, context->GetAttr("trunk_size", &trunk_size));
+    OP_REQUIRES_OK(context, context->GetAttr("e4m3_exponent_bias", &e4m3_exponent_bias));
+    OP_REQUIRES_OK(context, context->GetAttr("e5m2_exponent_bias", &e5m2_exponent_bias));
      }
 
      void Compute(OpKernelContext* context) override {
@@ -1251,10 +1284,16 @@ class ConvamInputGradOp: public OpKernel {
                 mode_,
                 quant_filter_data,
                 quant_grad_data,
-                accum_mode_
+                accum_mode_,
+                static_cast<size_t>(trunk_size),
+                static_cast<uint8_t>(e4m3_exponent_bias),
+                static_cast<uint8_t>(e5m2_exponent_bias)
                 );
      }
   private:
+  int trunk_size = 0;
+  int e4m3_exponent_bias = 7;
+  int e5m2_exponent_bias = 31;
   FloatMode mode_;
   std::string FPMode_;
   AccumMode accum_mode_;

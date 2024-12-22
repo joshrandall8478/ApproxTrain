@@ -17,7 +17,7 @@ using CPUDevice = Eigen::ThreadPoolDevice;
 template <typename T>
 __global__ void quant_fp32_e4m3clipping(const T* src, T* dest, size_t size, uint8_t exponent_bias = 7);
 template <typename T>
-__global__ void quant_fp32_e5m2clipping(const T* src, T* dest, size_t size, uint8_t exponent_bias = 15);
+__global__ void quant_fp32_e5m2clipping(const T* src, T* dest, size_t size, uint8_t exponent_bias = 31);
 
 template <typename T>
 void quant_fp32_e4m3clipping_launcher(const GPUDevice &d, const T* src, T* dest, size_t size, uint8_t exponent_bias = 7){

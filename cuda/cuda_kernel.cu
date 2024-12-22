@@ -124,7 +124,9 @@ void ConvamKernelLauncher(
     T* quant_input,
     T* quant_filter,
     AccumMode accum_mode,
-    size_t trunk_size = 0
+    size_t trunk_size = 0,
+    uint8_t e4m3_exponent_bias = 7,
+    uint8_t e5m2_exponent_bias = 31
   ){
     T* input_data = const_cast<T*>(inputs);
     T* filter_data = const_cast<T*>(filter);
@@ -134,12 +136,12 @@ void ConvamKernelLauncher(
         if (mode == FloatMode::FP8HYB) {
             // if mode is fp8hyb, we need to quantize the input and filter using e4m3
             // get size of input and filter
-            quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, quant_input_size);
-            quant_fp32_e4m3clipping_launcher<T>(d, filter, quant_filter, quant_filter_size);
+            quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, quant_input_size, e4m3_exponent_bias);
+            quant_fp32_e4m3clipping_launcher<T>(d, filter, quant_filter, quant_filter_size, e4m3_exponent_bias);
         } else if (mode == FloatMode::FP8E5M2) {
             // if mode is fp8e5m2, we need to quantize the input and filter using e5m2
-            quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, quant_input_size);
-            quant_fp32_e5m2clipping_launcher<T>(d, filter, quant_filter, quant_filter_size);
+            quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, quant_input_size, e5m2_exponent_bias);
+            quant_fp32_e5m2clipping_launcher<T>(d, filter, quant_filter, quant_filter_size, e5m2_exponent_bias);
         }
         input_data = quant_input;
         filter_data = quant_filter;
@@ -202,7 +204,8 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
         const int filter_rows, const int filter_cols, const int in_depth,
         const int input_cols, const int input_rows, const T* filter,
         T* im2col, const int padding, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
-        T* quant_input, T* quant_filter, AccumMode accum_mode, size_t trunk_size = 0
+        T* quant_input, T* quant_filter, AccumMode accum_mode, size_t trunk_size, uint8_t e4m3_exponent_bias,
+    uint8_t e5m2_exponent_bias
         ) {
     // this is a very primitive tiling function
     //TODO Simplify the cases
@@ -237,7 +240,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     quant_input,
                     quant_filter,
                     accum_mode,
-                    trunk_size
+                    trunk_size,
+                    e4m3_exponent_bias,
+                    e5m2_exponent_bias
                     );
         } else {
             loop1Da(i, batch, max_batch) {
@@ -266,7 +271,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     quant_input + i * oneinputsize,
                     quant_filter,
                     accum_mode,
-                    trunk_size
+                    trunk_size,
+                    e4m3_exponent_bias,
+                    e5m2_exponent_bias
                     );
             }
         }
@@ -295,7 +302,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     quant_input,
                     quant_filter,
                     accum_mode,
-                    trunk_size
+                    trunk_size,
+                    e4m3_exponent_bias,
+                    e5m2_exponent_bias
                     );
     } else {
         size_t const block_size = 16;
@@ -325,7 +334,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     quant_input,
                     quant_filter,
                     accum_mode,
-                    trunk_size
+                    trunk_size,
+                    e4m3_exponent_bias,
+                    e5m2_exponent_bias
                     );
         } else {
             loop1Da(i, batch, max_batch){
@@ -354,7 +365,9 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     quant_input + i * oneinputsize,
                     quant_filter,
                     accum_mode,
-                    trunk_size
+                    trunk_size,
+                    e4m3_exponent_bias,
+                    e5m2_exponent_bias
                     );
             }
         }
@@ -452,7 +465,9 @@ void ConvamFilterGradKernelLauncher(
     T* quant_input,
     T* quant_grad,
     AccumMode accum_mode,
-    size_t trunk_size = 0
+    size_t trunk_size = 0,
+    uint8_t e4m3_exponent_bias = 7,
+    uint8_t e5m2_exponent_bias = 31
 ){
     T* input_data = const_cast<T*>(input);
     T* grad_data = const_cast<T*>(grad);
@@ -461,12 +476,12 @@ void ConvamFilterGradKernelLauncher(
         int quant_grad_size = batch * grad_height * grad_width * grad_channel;
         if (mode == FloatMode::FP8HYB) {
             // if mode is fp8hyb, we need to quantize the input using e4m3 and the grad using e5m2
-            quant_fp32_e4m3clipping_launcher<T>(d, input, quant_input, quant_input_size);
-            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size);
+            quant_fp32_e4m3clipping_launcher<T>(d, input, quant_input, quant_input_size, e4m3_exponent_bias);
+            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size, e5m2_exponent_bias);
         } else if (mode == FloatMode::FP8E5M2) {
             // if mode is fp8e5m2, we need to quantize the input and grad using e5m2
-            quant_fp32_e5m2clipping_launcher<T>(d, input, quant_input, quant_input_size);
-            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size);
+            quant_fp32_e5m2clipping_launcher<T>(d, input, quant_input, quant_input_size, e5m2_exponent_bias);
+            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size, e5m2_exponent_bias);
         }
         input_data = quant_input;
         grad_data = quant_grad;
@@ -493,7 +508,7 @@ void ConvamFilterGradFunctor<Eigen::GpuDevice, T>::operator()(
         const int filter_top_offset, const int stride_rows,
         const int stride_cols, const int filter_cols, const int filter_rows,
         T* output, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
-        T* quant_input, T* quant_grad, AccumMode accum_mode, size_t trunk_size = 0
+        T* quant_input, T* quant_grad, AccumMode accum_mode, size_t trunk_size, uint8_t e4m3_exponent_bias, uint8_t e5m2_exponent_bias
         ) {
     ConvamFilterGradKernelLauncher<T>(
             d,
@@ -519,7 +534,9 @@ void ConvamFilterGradFunctor<Eigen::GpuDevice, T>::operator()(
             quant_input,
             quant_grad,
             accum_mode,
-            trunk_size
+            trunk_size,
+            e4m3_exponent_bias,
+            e5m2_exponent_bias
             );
 }
 template <typename T>
@@ -625,7 +642,9 @@ void ConvamInputGradKernelLauncher(
     T* quant_filter,
     T* quant_grad,
     AccumMode accum_mode,
-    size_t trunk_size = 0
+    size_t trunk_size = 0,
+    uint8_t e4m3_exponent_bias = 7,
+    uint8_t e5m2_exponent_bias = 31
 
 ){
 
@@ -636,12 +655,12 @@ void ConvamInputGradKernelLauncher(
         int quant_filter_size = input_channel* output_channel * filter_height * filter_width;
         if (mode == FloatMode::FP8HYB) {
             // if mode is fp8hyb, we need to quantize the grad using e5m2 and the filter using e4m3
-            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size);
-            quant_fp32_e4m3clipping_launcher<T>(d, filter, quant_filter, quant_filter_size);
+            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size, e5m2_exponent_bias);
+            quant_fp32_e4m3clipping_launcher<T>(d, filter, quant_filter, quant_filter_size, e4m3_exponent_bias);
         } else if (mode == FloatMode::FP8E5M2) {
             // if mode is fp8e5m2, we need to quantize the grad and filter using e5m2
-            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size);
-            quant_fp32_e5m2clipping_launcher<T>(d, filter, quant_filter, quant_filter_size);
+            quant_fp32_e5m2clipping_launcher<T>(d, grad, quant_grad, quant_grad_size, e5m2_exponent_bias);
+            quant_fp32_e5m2clipping_launcher<T>(d, filter, quant_filter, quant_filter_size, e5m2_exponent_bias);
         }
         grad_data = quant_grad;
         filter_data = quant_filter;
@@ -676,7 +695,7 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
         const int input_rows, const int input_cols, const int in_depth,
         T* output, const int out_rows, const int out_cols, 
         approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
-        T* quant_filter, T* quant_grad,  AccumMode accum_mode, size_t trunk_size = 0
+        T* quant_filter, T* quant_grad,  AccumMode accum_mode, size_t trunk_size, uint8_t e4m3_exponent_bias, uint8_t e5m2_exponent_bias
         ){
     // a very primitive tiling, I mean VERY
     //auto const oneinputsize = input_rows*input_cols*in_depth;
@@ -712,7 +731,9 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                 quant_filter,
                 quant_grad,
                 accum_mode,
-                trunk_size
+                trunk_size,
+                e4m3_exponent_bias,
+                e5m2_exponent_bias
                 );
     } else {
         loop1Da(i, batch, max_batch){
@@ -744,7 +765,9 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                      quant_filter,
                      quant_grad + i*oneoutputsize,
                      accum_mode,
-                     trunk_size   
+                     trunk_size,
+                     e4m3_exponent_bias,
+                     e5m2_exponent_bias
                 );
         }
     }

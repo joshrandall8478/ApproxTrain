@@ -22,7 +22,8 @@ template <typename T>
 void DenseamFunctor<GpuDevice, T>::operator()(
         const GpuDevice& d, const T* inputs, const T* weights, T* output,
         const int batch, const int units, const int input_width,
-        approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_weight, AccumMode accum_mode, size_t trunk_size = 0
+        approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_weight, AccumMode accum_mode, size_t trunk_size, uint8_t e4m3_exponent_bias,
+    uint8_t e5m2_exponent_bias
         )
 { 
     T* input_data = const_cast<T*>(inputs);
@@ -33,12 +34,12 @@ void DenseamFunctor<GpuDevice, T>::operator()(
     if (mode == FloatMode::FP8HYB || mode == FloatMode::FP8E5M2) {
         switch (mode){
             case FloatMode::FP8E5M2:  
-                quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, input_size);
-                quant_fp32_e5m2clipping_launcher<T>(d, weights, quant_weight, weight_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, inputs, quant_input, input_size, e5m2_exponent_bias);
+                quant_fp32_e5m2clipping_launcher<T>(d, weights, quant_weight, weight_size, e5m2_exponent_bias);
                 break;
             case FloatMode::FP8HYB:
-                quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, input_size);
-                quant_fp32_e4m3clipping_launcher<T>(d, weights, quant_weight, weight_size);
+                quant_fp32_e4m3clipping_launcher<T>(d, inputs, quant_input, input_size, e4m3_exponent_bias);
+                quant_fp32_e4m3clipping_launcher<T>(d, weights, quant_weight, weight_size, e4m3_exponent_bias);
                 break;
             default:
                 break;
@@ -65,7 +66,7 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
     (const GpuDevice& d, const T* inputs, const T* grads,
             T* output, const int batch, const int units, const int input_width,
             approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_grad, AccumMode accum_mode, T *input_T,
-    size_t trunk_size = 0)
+    size_t trunk_size, uint8_t e4m3_exponent_bias, uint8_t e5m2_exponent_bias)
 {
     // transpose the input
     transpose_launcher<T>(d, inputs, input_T, batch, input_width);
@@ -77,12 +78,12 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
     if (mode == FloatMode::FP8HYB || mode == FloatMode::FP8E5M2) {
         switch (mode){
             case FloatMode::FP8E5M2:  
-                quant_fp32_e5m2clipping_launcher<T>(d, input_T, quant_input, input_size);
-                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, input_T, quant_input, input_size, e5m2_exponent_bias);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size, e5m2_exponent_bias);
                 break;
             case FloatMode::FP8HYB:
-                quant_fp32_e4m3clipping_launcher<T>(d, input_T, quant_input, input_size);
-                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                quant_fp32_e4m3clipping_launcher<T>(d, input_T, quant_input, input_size, e4m3_exponent_bias);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size, e5m2_exponent_bias);
                 break;
             default:
                 break;
@@ -110,7 +111,7 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
     (const GpuDevice& d, const T* weights, const T* grads,
             T* output, const int batch, const int units, const int input_width,
             approx_mul_lut<GpuDevice>& mul_lut, FloatMode mode, T* quant_weight, T* quant_grad, AccumMode accum_mode, T* weight_T,
-    size_t trunk_size = 0)
+    size_t trunk_size, uint8_t e4m3_exponent_bias, uint8_t e5m2_exponent_bias)
 {
     // transpose the weights
     transpose_launcher<T>(d, weights, weight_T, input_width, units);
@@ -122,12 +123,12 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
     if (mode == FloatMode::FP8HYB || mode == FloatMode::FP8E5M2) {
         switch (mode){
             case FloatMode::FP8E5M2:  
-                quant_fp32_e5m2clipping_launcher<T>(d, weight_T, quant_weight, weight_size);
-                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                quant_fp32_e5m2clipping_launcher<T>(d, weight_T, quant_weight, weight_size, e5m2_exponent_bias);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size, e5m2_exponent_bias);
                 break;
             case FloatMode::FP8HYB:
-                quant_fp32_e4m3clipping_launcher<T>(d, weight_T, quant_weight, weight_size);
-                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size);
+                quant_fp32_e4m3clipping_launcher<T>(d, weight_T, quant_weight, weight_size, e4m3_exponent_bias);
+                quant_fp32_e5m2clipping_launcher<T>(d, grads, quant_grad, grad_size, e5m2_exponent_bias);
                 break;
             default:
                 break;

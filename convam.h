@@ -14,8 +14,8 @@ struct ConvamFunctor {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             T* im2col, const int padding,
-            approx_mul_lut<Device>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter, AccumMode accum_mode
-          );
+            approx_mul_lut<Device>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter, AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
+            );
 };
 
 template <typename Device, typename T>
@@ -27,7 +27,7 @@ struct ConvamInputGradFunctor {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols, 
-          approx_mul_lut<Device>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad,  AccumMode accum_mode
+          approx_mul_lut<Device>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad,  AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
           );
 };
 
@@ -39,7 +39,7 @@ struct ConvamFilterGradFunctor{
           const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<Device>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad,  AccumMode accum_mode
+          T* output, approx_mul_lut<Device>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad,  AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
           );
 };
 #ifdef GOOGLE_CUDA
@@ -53,7 +53,7 @@ struct ConvamFunctor<Eigen::GpuDevice, T> {
             const int filter_rows, const int filter_cols, const int in_depth,
             const int input_cols, const int input_rows, const T* filter,
             T* im2col, const int padding, 
-            approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter,  AccumMode accum_mode
+            approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_filter,  AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
           );
 };
 
@@ -66,7 +66,7 @@ struct ConvamInputGradFunctor<Eigen::GpuDevice, T> {
           const int stride_rows, const int stride_cols, const int batch,
           const int input_rows, const int input_cols, const int in_depth,
           T* output, const int out_rows, const int out_cols,
-          approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad, AccumMode accum_mode
+          approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode, T* quant_filter, T* quant_grad, AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
           );
 };
 template <typename T>
@@ -77,7 +77,7 @@ struct ConvamFilterGradFunctor<Eigen::GpuDevice, T>{
           const int out_rows,const int out_depth, const int filter_left_offset,
           const int filter_top_offset, const int stride_rows,
           const int stride_cols, const int filter_cols, const int filter_rows,
-          T* output, approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad, AccumMode accum_mode
+          T* output, approx_mul_lut<Eigen::GpuDevice>& mul_lut, FloatMode mode, T *quant_input, T *quant_grad, AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
           );
 };
 

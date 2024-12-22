@@ -41,7 +41,10 @@ REGISTER_OP("Denseam")
   .Attr("T: {float, int32}")
   .Attr("mant_mul_lut: string = ''")
   .Attr("FPMode: string = 'FP32'")
-    .Attr("AccumMode: string = 'RNE'")
+  .Attr("AccumMode: string = 'RNE'")
+  .Attr("trunk_size: int = 0")
+  .Attr("e4m3_exponent_bias: int = 7")
+  .Attr("e5m2_exponent_bias: int = 31")
   .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
 
    shape_inference::ShapeHandle input_shape;
@@ -62,7 +65,7 @@ template <typename T>
 struct DenseamFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* weights,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_weight, AccumMode accum_mode
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_weight, AccumMode accum_mode, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -85,6 +88,10 @@ class DenseamOp: public OpKernel{
             mode_ = StringToFloatMode(FPMode_);
             OP_REQUIRES_OK(context, context->GetAttr("AccumMode", &AccumMode_));
             accum_mode_ = StringToAccumMode(AccumMode_);
+            // get trunk_size, e4m3_exponent_bias, and e5m2_exponent_bias
+            OP_REQUIRES_OK(context, context->GetAttr("trunk_size", &trunk_size));
+            OP_REQUIRES_OK(context, context->GetAttr("e4m3_exponent_bias", &e4m3_exponent_bias));
+            OP_REQUIRES_OK(context, context->GetAttr("e5m2_exponent_bias", &e5m2_exponent_bias));
         }
         void Compute(OpKernelContext* context) override {
             const Tensor& input = context->input(0);
@@ -140,11 +147,17 @@ class DenseamOp: public OpKernel{
                     mode_,
                     quant_input_tensor,
                     quant_weight_tensor,
-                    accum_mode_
+                    accum_mode_,
+                    static_cast<size_t>(trunk_size),
+                    static_cast<uint8_t>(e4m3_exponent_bias),
+                    static_cast<uint8_t>(e5m2_exponent_bias)
                     );
         }
 
   private:
+  int trunk_size = 0;
+  int e4m3_exponent_bias = 7;
+  int e5m2_exponent_bias = 31;
   approx_mul_lut<Device> mul_lut_;
   FloatMode mode_;
   std::string FPMode_;
@@ -177,7 +190,7 @@ template <typename T>
 struct DenseamWeightGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* input, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_grad, AccumMode accum_mode, T *input_T
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_input, T* quant_grad, AccumMode accum_mode, T *input_T, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
             ){
             for(int i = 0; i < batch; i++){
                 for(int j = 0; j < units; j++){
@@ -192,7 +205,7 @@ template <typename T>
 struct DenseamInputGradFunctor<CPUDevice, T>{
     void operator()(const CPUDevice& d, const T* weight, const T* grads,
             T* output, const int batch, const int units, const int input_width,
-            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_weight, T* quant_grad, AccumMode accum_mode, T *weight_T
+            approx_mul_lut<CPUDevice>& mul_lut, FloatMode mode, T* quant_weight, T* quant_grad, AccumMode accum_mode, T *weight_T, size_t trunk_size = 0, uint8_t e4m3_exponent_bias = 7, uint8_t e5m2_exponent_bias = 31
             ){
             for(int i = 0; i < batch; i++)
             for(int i = 0; i < batch; i++){
@@ -212,9 +225,12 @@ REGISTER_OP("DenseamGrad")
   .Output("grad_input: T")
   .Output("grad_weights: T")
   .Attr("T: {float, int32}")
-.Attr("mant_mul_lut: string = ''")
-.Attr("FPMode: string = 'FP32'")
-.Attr("AccumMode: string = 'RNE'");
+  .Attr("mant_mul_lut: string = ''")
+  .Attr("FPMode: string = 'FP32'")
+  .Attr("AccumMode: string = 'RNE'")
+  .Attr("trunk_size: int = 0")
+  .Attr("e4m3_exponent_bias: int = 7")
+  .Attr("e5m2_exponent_bias: int = 31");
 template<typename Device, typename T>
 class DenseamGradOp: public OpKernel {
 public:
@@ -225,6 +241,10 @@ public:
     mode_ = StringToFloatMode(FPMode_);
     OP_REQUIRES_OK(context, context->GetAttr("AccumMode", &AccumMode_));
     accum_mode_ = StringToAccumMode(AccumMode_);
+    // get trunk_size, e4m3_exponent_bias, and e5m2_exponent_bias
+    OP_REQUIRES_OK(context, context->GetAttr("trunk_size", &trunk_size));
+    OP_REQUIRES_OK(context, context->GetAttr("e4m3_exponent_bias", &e4m3_exponent_bias));
+    OP_REQUIRES_OK(context, context->GetAttr("e5m2_exponent_bias", &e5m2_exponent_bias));
   }
   void Compute(OpKernelContext* context) override {
 
@@ -293,7 +313,10 @@ public:
             quant_input_data,
             quant_grad_data,
             accum_mode_,
-            transposed_input_data
+            transposed_input_data,
+            trunk_size,
+            e4m3_exponent_bias,
+            e5m2_exponent_bias
             );
     DenseamInputGradFunctor<Device, T>()(
             context->eigen_device<Device>(),    
@@ -308,15 +331,21 @@ public:
             quant_weight_data,
             quant_grad_data,
             accum_mode_,
-            transposed_weight_data
+            transposed_weight_data,
+            trunk_size,
+            e4m3_exponent_bias,
+            e5m2_exponent_bias
             );
   }
   private:
+  int trunk_size = 0;
+  int e4m3_exponent_bias = 7;
+  int e5m2_exponent_bias = 31;
   approx_mul_lut<Device> mul_lut_;
-    FloatMode mode_;
-    std::string FPMode_;
-    AccumMode accum_mode_;
-    std::string AccumMode_;
+  FloatMode mode_;
+  std::string FPMode_;
+  AccumMode accum_mode_;
+  std::string AccumMode_;
   TF_DISALLOW_COPY_AND_ASSIGN(DenseamGradOp);
 };
 // Register the CPU kernels.
