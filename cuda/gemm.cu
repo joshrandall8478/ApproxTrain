@@ -6,12 +6,13 @@
 #include <cuda_fp16.h>
 #include "fp8_conversion.cuh"
 #include "accumulate.cuh"
+#include "gemm.cuh"
 using namespace tensorflow;
 
 
 
 
-#define TILE_DIM 16
+
 /* start of new implementation*/
 /* gemm bf16 accumulate */
 template <typename T>
@@ -852,7 +853,7 @@ template __global__ void gemm_fp16_accumulate_rz_trunksize_16<int32>(size_t m, s
      const int32 *a, size_t lda, const int32 *b, size_t ldb,
      int32 *c, size_t ldc);
 
-#define TRUNK_DIM_32 32
+
 template <typename T>
 __global__ void gemm_fp16_accumulate_rz_trunksize_32(size_t m, size_t n, size_t k,
    const T *a, size_t lda, const T *b, size_t ldb,
@@ -1053,5 +1054,85 @@ template __global__ void gemm_bf16_accumulate_trunksize_32<int32>(size_t m, size
      const int32 *a, size_t lda, const int32 *b, size_t ldb,
      int32 *c, size_t ldc);
 
+template <typename T>
+__global__ void gemm_fp16_accumulate_trunksize_16(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc) {
+     T value(0);
+     int Row = blockIdx.y * TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x * TILE_DIM + threadIdx.x;
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     for (int i = 0; i < (TILE_DIM + k - 1) / TILE_DIM; ++i) {
+          if (i * TILE_DIM + threadIdx.x < k && Row < m) {
+               As[threadIdx.y][threadIdx.x] = a[Row * lda + i * TILE_DIM + threadIdx.x];
+          } else {
+               As[threadIdx.y][threadIdx.x] = T(0);
+          }
+          if (i * TILE_DIM + threadIdx.y < k && Col < n) {
+               Bs[threadIdx.y][threadIdx.x] = b[(i * TILE_DIM + threadIdx.y) * ldb + Col];
+          } else {
+               Bs[threadIdx.y][threadIdx.x] = T(0);
+          }
+          __syncthreads();
+          T tileSum = T(0);
+          for (int n = 0; n < TILE_DIM; ++n) {
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               tileSum = half_add(tileSum, mul);
+          }
+          value = half_add(tileSum, value);
+          __syncthreads();
+     }
+     if (Row < m && Col < n) {
+          c[((blockIdx.y * blockDim.y + threadIdx.y) * ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+template __global__ void gemm_fp16_accumulate_trunksize_16<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc);
+template __global__ void gemm_fp16_accumulate_trunksize_16<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc);
+
+
+template <typename T>
+__global__ void gemm_fp16_accumulate_trunksize_32(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc) {
+     T value(0);
+     int Row = blockIdx.y * TRUNK_DIM_32 + threadIdx.y;
+     int Col = blockIdx.x * TRUNK_DIM_32 + threadIdx.x;
+     __shared__ T As[TRUNK_DIM_32][TRUNK_DIM_32];
+     __shared__ T Bs[TRUNK_DIM_32][TRUNK_DIM_32];
+     for (int i = 0; i < (TRUNK_DIM_32 + k - 1) / TRUNK_DIM_32; ++i) {
+          if (i * TRUNK_DIM_32 + threadIdx.x < k && Row < m) {
+               As[threadIdx.y][threadIdx.x] = a[Row * lda + i * TRUNK_DIM_32 + threadIdx.x];
+          } else {
+               As[threadIdx.y][threadIdx.x] = T(0);
+          }
+          if (i * TRUNK_DIM_32 + threadIdx.y < k && Col < n) {
+               Bs[threadIdx.y][threadIdx.x] = b[(i * TRUNK_DIM_32 + threadIdx.y) * ldb + Col];
+          } else {
+               Bs[threadIdx.y][threadIdx.x] = T(0);
+          }
+          __syncthreads();
+          T tileSum = T(0);
+          for (int n = 0; n < TRUNK_DIM_32; ++n) {
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               tileSum = half_add(tileSum, mul);
+          }
+          value = half_add(tileSum, value);
+          __syncthreads();
+     }
+     if (Row < m && Col < n) {
+          c[((blockIdx.y * blockDim.y + threadIdx.y) * ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+template __global__ void gemm_fp16_accumulate_trunksize_32<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc);
+template __global__ void gemm_fp16_accumulate_trunksize_32<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc);
 
 /* end of new implementation*/
