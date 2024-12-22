@@ -126,6 +126,9 @@ class denseam(Layer):
                mant_mul_lut='',
                FPMode='FP32',
                AccumMode='RNE',
+               trunk_size = 0,
+                e4m3_exponent_bias = 7,
+                e5m2_exponent_bias = 31,
                **kwargs):
     super(denseam, self).__init__(
         activity_regularizer=activity_regularizer, **kwargs)
@@ -148,6 +151,9 @@ class denseam(Layer):
     self.mant_mul_lut = mant_mul_lut
     self.FPMode = FPMode
     self.AccumMode = AccumMode
+    self.trunk_size = trunk_size
+    self.e4m3_exponent_bias = e4m3_exponent_bias
+    self.e5m2_exponent_bias = e5m2_exponent_bias
   def build(self, input_shape):
     dtype = dtypes.as_dtype(self.dtype or K.floatx())
     if not (dtype.is_floating or dtype.is_complex):
@@ -212,7 +218,7 @@ class denseam(Layer):
             self.kernel, ids, weights, combiner='sum')
       else:
         #outputs = gen_math_ops.MatMul(a=inputs, b=self.kernel)
-        outputs = amdense_module.denseam(inputs, self.kernel, self.mant_mul_lut, self.FPMode, self.AccumMode)
+        outputs = amdense_module.denseam(inputs, self.kernel, self.mant_mul_lut, self.FPMode, self.AccumMode, self.trunk_size, self.e4m3_exponent_bias, self.e5m2_exponent_bias)
    #     outputs = amdense_module.denseam(inputs, self.kernel)
     # Broadcast kernel to inputs.
     else:
@@ -257,11 +263,14 @@ class denseam(Layer):
         'bias_constraint': constraints.serialize(self.bias_constraint),
         'mant_mul_lut': self.mant_mul_lut,
         'FPMode': self.FPMode,
-        'AccumMode': self.AccumMode
+        'AccumMode': self.AccumMode,
+        'trunk_size': self.trunk_size,
+        'e4m3_exponent_bias': self.e4m3_exponent_bias,
+        'e5m2_exponent_bias': self.e5m2_exponent_bias
     })
     return config
 
 @ops.RegisterGradient("Denseam")
 def _dense_grad_cc(op, grad):
-    return amdense_module.denseam_grad(grad, op.inputs[0], op.inputs[1], mant_mul_lut=op.get_attr("mant_mul_lut"), FPMode=op.get_attr("FPMode"), AccumMode=op.get_attr("AccumMode")) 
+    return amdense_module.denseam_grad(grad, op.inputs[0], op.inputs[1], mant_mul_lut=op.get_attr("mant_mul_lut"), FPMode=op.get_attr("FPMode"), AccumMode=op.get_attr("AccumMode"), trunk_size=op.get_attr("trunk_size"), e4m3_exponent_bias=op.get_attr("e4m3_exponent_bias"), e5m2_exponent_bias=op.get_attr("e5m2_exponent_bias"))
     #return amdense_module.denseam_grad(grad, op.inputs[0], op.inputs[1], op.get_attr("mant_mul_lut")) 

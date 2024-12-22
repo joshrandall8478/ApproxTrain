@@ -94,7 +94,10 @@ def amconvolution_internal(
     num_spatial_dims=None,
     mant_mul_lut='',
     FPMode='FP32',
-    AccumMode='RNE'
+    AccumMode='RNE',
+    trunk_size = 0,
+    e4m3_exponent_bias = 7,
+    e5m2_exponent_bias = 31
     ):
   """Internal function which performs rank agnostic convolution.
 
@@ -195,7 +198,10 @@ def amconvolution_internal(
           name=name,
           mant_mul_lut=mant_mul_lut,
           FPMode=FPMode,
-          AccumMode=AccumMode
+          AccumMode=AccumMode,
+          trunk_size = trunk_size,
+          e4m3_exponent_bias = e4m3_exponent_bias,
+          e5m2_exponent_bias = e5m2_exponent_bias
           )
     else:
         raise ValueError("Dilation is not supported in current implementation")
@@ -212,7 +218,10 @@ def amconvolution_v2(  # pylint: disable=missing-docstring
     name=None,
     mant_mul_lut='',
     FPMode='FP32',
-    AccumMode='RNE'
+    AccumMode='RNE',
+    trunk_size = 0,
+    e4m3_exponent_bias = 7,
+    e5m2_exponent_bias = 31
     ):
   return amconvolution_internal(
       input,  # pylint: disable=redefined-builtin
@@ -224,7 +233,10 @@ def amconvolution_v2(  # pylint: disable=missing-docstring
       name=name,
       mant_mul_lut=mant_mul_lut,
       FPMode=FPMode,
-      AccumMode=AccumMode
+      AccumMode=AccumMode,
+      trunk_size = trunk_size,
+      e4m3_exponent_bias = e4m3_exponent_bias,
+      e5m2_exponent_bias = e5m2_exponent_bias
       )
 
 @ops.RegisterGradient("Convam")
@@ -237,6 +249,9 @@ def _convam_grad_cc(op,grad):
   mant_mul_lut = op.get_attr("mant_mul_lut")
   FPMode = op.get_attr("FPMode")
   AccumMode = op.get_attr("AccumMode")
+  trunk_size = op.get_attr("trunk_size")
+  e4m3_exponent_bias = op.get_attr("e4m3_exponent_bias")
+  e5m2_exponent_bias = op.get_attr("e5m2_exponent_bias")
   # shape_0 input shape_1 filter
   shape_0 = array_ops.shape(op.inputs[0])
   shape_1 = array_ops.shape(op.inputs[1])
@@ -247,7 +262,10 @@ def _convam_grad_cc(op,grad):
           data_format=data_format,
           mant_mul_lut=mant_mul_lut,
           FPMode=FPMode,
-          AccumMode=AccumMode
+          AccumMode=AccumMode,
+          trunk_size = trunk_size,
+          e4m3_exponent_bias = e4m3_exponent_bias,
+          e5m2_exponent_bias = e5m2_exponent_bias
           ),
           convam_module.convam_filter_grad(shape_1,op.inputs[0], grad,
           dilations=dilations,
@@ -256,5 +274,8 @@ def _convam_grad_cc(op,grad):
           data_format=data_format,
           mant_mul_lut=mant_mul_lut,
           FPMode=FPMode,
-          AccumMode=AccumMode
+          AccumMode=AccumMode,
+          trunk_size = trunk_size,
+          e4m3_exponent_bias = e4m3_exponent_bias,
+          e5m2_exponent_bias = e5m2_exponent_bias
           )]

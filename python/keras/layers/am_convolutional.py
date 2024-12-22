@@ -137,6 +137,9 @@ class AMConv(Layer):
                mant_mul_lut='', 
                FPMode='FP32',
                AccumMode='RNE',
+               trunk_size = 0,
+               e4m3_exponent_bias = 7,
+               e5m2_exponent_bias = 31,
                **kwargs):
     super(AMConv, self).__init__(
         trainable=trainable,
@@ -179,6 +182,9 @@ class AMConv(Layer):
     self.mant_mul_lut = mant_mul_lut
     self.FPMode = FPMode
     self.AccumMode = AccumMode
+    self.trunk_size = trunk_size
+    self.e4m3_exponent_bias = e4m3_exponent_bias
+    self.e5m2_exponent_bias = e5m2_exponent_bias
     #print(self.mant_mul_lut," lvl 1")
 
   def _validate_init(self):
@@ -259,6 +265,9 @@ class AMConv(Layer):
         mant_mul_lut=self.mant_mul_lut,
         FPMode=self.FPMode,
         AccumMode=self.AccumMode,
+        trunk_size = self.trunk_size,
+        e4m3_exponent_bias = self.e4m3_exponent_bias,
+        e5m2_exponent_bias = self.e5m2_exponent_bias,
         name=tf_op_name)
     self.built = True
 
@@ -365,13 +374,19 @@ class AMConv(Layer):
         'FPMode':
             self.FPMode,
         'AccumMode':
-            self.AccumMode
+            self.AccumMode,
+        'trunk_size':
+            self.trunk_size,
+        'e4m3_exponent_bias':
+            self.e4m3_exponent_bias,
+        'e5m2_exponent_bias':
+            self.e5m2_exponent_bias
     }
     base_config = super(AMConv, self).get_config()
     return dict(list(base_config.items()) + list(config.items()))
   @classmethod
-  def from_config(cls, config, mant_mul_lut=None, FPMode=None, AccumMode=None):
-        return cls(**config, mant_mul_lut=mant_mul_lut, FPMode=FPMode, AccumMode=AccumMode)
+  def from_config(cls, config, mant_mul_lut=None, FPMode=None, AccumMode=None, trunk_size=None, e4m3_exponent_bias=None, e5m2_exponent_bias=None):
+        return cls(**config, mant_mul_lut=mant_mul_lut, FPMode=FPMode, AccumMode=AccumMode, trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)
   def _compute_causal_padding(self, inputs):
     """Calculates padding for 'causal' option for 1-d conv layers."""
     left_pad = self.dilation_rate[0] * (self.kernel_size[0] - 1)
@@ -549,6 +564,9 @@ class AMConv2D(AMConv):
                mant_mul_lut='', 
                FPMode='FP32',
                AccumMode='RNE',
+               trunk_size = 0,
+               e4m3_exponent_bias = 7,
+               e5m2_exponent_bias = 31,
                **kwargs):
     super(AMConv2D, self).__init__(
         rank=2,
@@ -571,6 +589,9 @@ class AMConv2D(AMConv):
         mant_mul_lut=mant_mul_lut,
         FPMode=FPMode,
         AccumMode=AccumMode,
+        trunk_size = trunk_size,
+        e4m3_exponent_bias = e4m3_exponent_bias,
+        e5m2_exponent_bias = e5m2_exponent_bias,
         **kwargs)
       
 
