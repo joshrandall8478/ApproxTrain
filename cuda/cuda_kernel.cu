@@ -123,7 +123,8 @@ void ConvamKernelLauncher(
     FloatMode mode,
     T* quant_input,
     T* quant_filter,
-    AccumMode accum_mode
+    AccumMode accum_mode,
+    size_t trunk_size = 0
   ){
     T* input_data = const_cast<T*>(inputs);
     T* filter_data = const_cast<T*>(filter);
@@ -156,7 +157,7 @@ void ConvamKernelLauncher(
         //const int size = m*n;
         dim3 blockSize(16, 16, 1);
         dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-        GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode);
+        GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode, trunk_size);
         return;
     } else if (filter_row == in_row && filter_col== in_col &&
                padding == 1) {
@@ -170,7 +171,7 @@ void ConvamKernelLauncher(
          //const int size = m*n;
          dim3 blockSize(16, 16, 1);
          dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-         GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode);
+         GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode, trunk_size);
          gpuErrchk( cudaPeekAtLastError() );
          gpuErrchk( cudaDeviceSynchronize() );
          return;
@@ -184,7 +185,7 @@ void ConvamKernelLauncher(
     const size_t ldc = out_depth;
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode, trunk_size);
 
 }
 
@@ -201,7 +202,7 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
         const int filter_rows, const int filter_cols, const int in_depth,
         const int input_cols, const int input_rows, const T* filter,
         T* im2col, const int padding, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
-        T* quant_input, T* quant_filter, AccumMode accum_mode
+        T* quant_input, T* quant_filter, AccumMode accum_mode, size_t trunk_size = 0
         ) {
     // this is a very primitive tiling function
     //TODO Simplify the cases
@@ -235,7 +236,8 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     mode,
                     quant_input,
                     quant_filter,
-                    accum_mode
+                    accum_mode,
+                    trunk_size
                     );
         } else {
             loop1Da(i, batch, max_batch) {
@@ -263,7 +265,8 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     mode,
                     quant_input + i * oneinputsize,
                     quant_filter,
-                    accum_mode
+                    accum_mode,
+                    trunk_size
                     );
             }
         }
@@ -291,7 +294,8 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     mode,
                     quant_input,
                     quant_filter,
-                    accum_mode
+                    accum_mode,
+                    trunk_size
                     );
     } else {
         size_t const block_size = 16;
@@ -320,7 +324,8 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     mode,
                     quant_input,
                     quant_filter,
-                    accum_mode
+                    accum_mode,
+                    trunk_size
                     );
         } else {
             loop1Da(i, batch, max_batch){
@@ -348,7 +353,8 @@ void ConvamFunctor<GPUDevice, T>::operator()(const GPUDevice& d,
                     mode,
                     quant_input + i * oneinputsize,
                     quant_filter,
-                    accum_mode
+                    accum_mode,
+                    trunk_size
                     );
             }
         }
@@ -445,7 +451,8 @@ void ConvamFilterGradKernelLauncher(
     FloatMode mode,
     T* quant_input,
     T* quant_grad,
-    AccumMode accum_mode
+    AccumMode accum_mode,
+    size_t trunk_size = 0
 ){
     T* input_data = const_cast<T*>(input);
     T* grad_data = const_cast<T*>(grad);
@@ -474,7 +481,7 @@ void ConvamFilterGradKernelLauncher(
     const size_t ldc = n;
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad_data, ldb, out, ldc, blockSize, gridSize, mul_lut, mode, false, false, accum_mode);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad_data, ldb, out, ldc, blockSize, gridSize, mul_lut, mode, false, false, accum_mode, trunk_size);
 };
 
 template <typename T>
@@ -486,7 +493,7 @@ void ConvamFilterGradFunctor<Eigen::GpuDevice, T>::operator()(
         const int filter_top_offset, const int stride_rows,
         const int stride_cols, const int filter_cols, const int filter_rows,
         T* output, approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
-        T* quant_input, T* quant_grad, AccumMode accum_mode
+        T* quant_input, T* quant_grad, AccumMode accum_mode, size_t trunk_size = 0
         ) {
     ConvamFilterGradKernelLauncher<T>(
             d,
@@ -511,7 +518,8 @@ void ConvamFilterGradFunctor<Eigen::GpuDevice, T>::operator()(
             mode,
             quant_input,
             quant_grad,
-            accum_mode
+            accum_mode,
+            trunk_size
             );
 }
 template <typename T>
@@ -616,7 +624,8 @@ void ConvamInputGradKernelLauncher(
     FloatMode mode,
     T* quant_filter,
     T* quant_grad,
-    AccumMode accum_mode
+    AccumMode accum_mode,
+    size_t trunk_size = 0
 
 ){
 
@@ -654,7 +663,7 @@ void ConvamInputGradKernelLauncher(
     gpuErrchk( cudaDeviceSynchronize() );
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, rsfilter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, false, true, accum_mode);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, rsfilter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, false, true, accum_mode, trunk_size);
 };
 
 template <typename T>
@@ -667,7 +676,7 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
         const int input_rows, const int input_cols, const int in_depth,
         T* output, const int out_rows, const int out_cols, 
         approx_mul_lut<GPUDevice>& mul_lut, FloatMode mode,
-        T* quant_filter, T* quant_grad,  AccumMode accum_mode
+        T* quant_filter, T* quant_grad,  AccumMode accum_mode, size_t trunk_size = 0
         ){
     // a very primitive tiling, I mean VERY
     //auto const oneinputsize = input_rows*input_cols*in_depth;
@@ -702,7 +711,8 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                 mode,
                 quant_filter,
                 quant_grad,
-                accum_mode
+                accum_mode,
+                trunk_size
                 );
     } else {
         loop1Da(i, batch, max_batch){
@@ -733,7 +743,8 @@ void ConvamInputGradFunctor<Eigen::GpuDevice, T>::operator()(
                      mode,
                      quant_filter,
                      quant_grad + i*oneoutputsize,
-                     accum_mode     
+                     accum_mode,
+                     trunk_size   
                 );
         }
     }
