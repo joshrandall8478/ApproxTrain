@@ -7,7 +7,7 @@
 # -------------------------------------------------------------------
 
 # Note: Removed 'set -e' to handle errors explicitly
-# set -e  # Commented out to handle errors explicitly
+# set -e
 
 # ------------------------ Configuration --------------------------
 
@@ -67,7 +67,11 @@ construct_stats_path() {
     LUT_FILE_NAME=$3
     FPMode=$4
     ROUNDING=$5
-    EARLYSTOPPING=$6
+    TRUNK_SIZE=$6
+    E4M3=$7
+    E5M2=$8
+    EARLYSTOPPING=$9
+
 
     if [[ "$EARLYSTOPPING" == "Yes" || "$EARLYSTOPPING" == "yes" ]]; then
         EARLYSTOPPING_SUFFIX="_earlystopping"
@@ -75,7 +79,7 @@ construct_stats_path() {
         EARLYSTOPPING_SUFFIX=""
     fi
 
-    STATS_FILE="save/training_stats/${MODEL}_${DATASET}_${LUT_FILE_NAME}_${FPMode}_${ROUNDING}${EARLYSTOPPING_SUFFIX}.json"
+    STATS_FILE="save/training_stats/${MODEL}_${DATASET}_${LUT_FILE_NAME}_${FPMode}_${ROUNDING}_${TRUNK_SIZE}_${E4M3}_${E5M2}${EARLYSTOPPING_SUFFIX}.json"
     echo "$STATS_FILE"
 }
 
@@ -89,6 +93,9 @@ run_python_script() {
     FPMode=$6
     MODEL=$7
     DATASET=$8
+    TRUNK_SIZE=$9
+    E4M3=${10}
+    E5M2=${11}
 
     # Handle LUT parameter
     if [[ "$LUT" == "No" || "$LUT" == "no" ]]; then
@@ -107,15 +114,18 @@ run_python_script() {
         EARLYSTOPPING_ARG=""
     fi
 
-    # Construct the command
-    CMD="python3 $PYTHON_SCRIPT --SEED $SEED"
-
-    # Conditionally add --LUT parameter
-    if [[ -n "$LUT_ARG" ]]; then
-        CMD="$CMD $LUT_ARG"
-    fi
-
-    CMD="$CMD --EPOCH $EPOCH $EARLYSTOPPING_ARG --ROUNDING $ROUNDING --FPMode $FPMode --MODEL $MODEL --DATASET $DATASET"
+    CMD="python3 $PYTHON_SCRIPT \
+         --SEED $SEED \
+         $LUT_ARG \
+         --EPOCH $EPOCH \
+         $EARLYSTOPPING_ARG \
+         --ROUNDING $ROUNDING \
+         --FPMode $FPMode \
+         --MODEL $MODEL \
+         --DATASET $DATASET \
+         --trunk_size $TRUNK_SIZE \
+         --e4m3_exponent_bias $E4M3 \
+         --e5m2_exponent_bias $E5M2"
 
     # Remove any double spaces caused by empty arguments
     CMD=$(echo "$CMD" | tr -s ' ')
@@ -157,7 +167,11 @@ echo "$HEADER" > "$TEMP_CSV"
 CURRENT_LINE=2  # Start from line 2 because header is line 1
 
 # Read the CSV excluding the header using process substitution
-while IFS=, read -r SEED LUT EPOCH EARLYSTOPPING ROUNDING FPMode MODEL DATASET TRAIN_TIME TEST_ACC
+#
+# The header columns are (12 total):
+#   SEED,LUT,EPOCH,EARLYSTOPPING,ROUNDING,FPMode,MODEL,DATASET,TrunkSize,e4m3,e5m2,Train time per batch,Test Acc
+#
+while IFS=, read -r SEED LUT EPOCH EARLYSTOPPING ROUNDING FPMode MODEL DATASET TRUNK_SIZE E4M3 E5M2 TRAIN_TIME TEST_ACC
 do
     # Trim whitespace from variables
     SEED=$(echo "$SEED" | xargs)
@@ -168,6 +182,9 @@ do
     FPMode=$(echo "$FPMode" | xargs)
     MODEL=$(echo "$MODEL" | xargs)
     DATASET=$(echo "$DATASET" | xargs)
+    TRUNK_SIZE=$(echo "$TRUNK_SIZE" | xargs)
+    E4M3=$(echo "$E4M3" | xargs)
+    E5M2=$(echo "$E5M2" | xargs)
     TRAIN_TIME=$(echo "$TRAIN_TIME" | xargs)
     TEST_ACC=$(echo "$TEST_ACC" | xargs)
 
@@ -182,21 +199,23 @@ do
         echo "Epoch: $EPOCH"
         echo "EarlyStopping: $EARLYSTOPPING"
         echo "Rounding: $ROUNDING"
+        echo "TrunkSize: $TRUNK_SIZE"
+        echo "e4m3_exponent_bias: $E4M3"
+        echo "e5m2_exponent_bias: $E5M2"
 
         # Run the Python script
-        run_python_script "$SEED" "$LUT" "$EPOCH" "$EARLYSTOPPING" "$ROUNDING" "$FPMode" "$MODEL" "$DATASET"
+        run_python_script "$SEED" "$LUT" "$EPOCH" "$EARLYSTOPPING" "$ROUNDING" "$FPMode" "$MODEL" "$DATASET" \
+                          "$TRUNK_SIZE" "$E4M3" "$E5M2"
         RUN_STATUS=$?
 
         if [[ $RUN_STATUS -ne 0 ]]; then
             echo "Error: Python script failed with status $RUN_STATUS."
             echo "Skipping metrics extraction and recording."
             # Append the row without updating metrics
-            echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,," >> "$TEMP_CSV"
-            # Optionally, you can choose to exit or continue with the next experiment
-            # For this script, we'll continue with the next experiment
-            # Increment the line counter
-            ((CURRENT_LINE++))
-            continue
+            echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRUNK_SIZE,$E4M3,$E5M2,," >> "$TEMP_CSV"
+
+            # Exit the script entirely (which also breaks the loop)
+            exit 1
         else
             # Determine LUT file name
             if [[ "$LUT" == "No" || "$LUT" == "no" ]]; then
@@ -206,13 +225,13 @@ do
             fi
 
             # Construct the path to the JSON stats file
-            STATS_FILE=$(construct_stats_path "$MODEL" "$DATASET" "$LUT_FILE_NAME" "$FPMode" "$ROUNDING" "$EARLYSTOPPING")
+            STATS_FILE=$(construct_stats_path "$MODEL" "$DATASET" "$LUT_FILE_NAME" "$FPMode" "$ROUNDING" "$TRUNK_SIZE" "$E4M3" "$E5M2" "$EARLYSTOPPING")
 
             # Check if the JSON stats file exists
             if [[ -f "$STATS_FILE" ]]; then
                 echo "Found stats file: $STATS_FILE"
 
-                # Extract Test Accuracy and Avg Batch Time using inline Python
+                # Extract Test Accuracy and Avg Batch Time
                 METRICS=$(extract_metrics "$STATS_FILE")
                 TEST_ACC_VALUE=$(echo "$METRICS" | cut -d',' -f1)
                 TRAIN_TIME_PER_BATCH=$(echo "$METRICS" | cut -d',' -f2)
@@ -221,11 +240,13 @@ do
                 echo "Test Accuracy: $TEST_ACC_VALUE"
 
                 # Append the updated row to the temporary CSV
-                echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRAIN_TIME_PER_BATCH,$TEST_ACC_VALUE" >> "$TEMP_CSV"
+                echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRUNK_SIZE,$E4M3,$E5M2,$TRAIN_TIME_PER_BATCH,$TEST_ACC_VALUE" \
+                  >> "$TEMP_CSV"
             else
                 echo "Error: Stats file '$STATS_FILE' not found. Skipping metrics recording."
                 # Append the row without updating metrics
-                echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,," >> "$TEMP_CSV"
+                echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRUNK_SIZE,$E4M3,$E5M2,," \
+                  >> "$TEMP_CSV"
             fi
         fi
     else
@@ -238,10 +259,14 @@ do
         echo "Epoch: $EPOCH"
         echo "EarlyStopping: $EARLYSTOPPING"
         echo "Rounding: $ROUNDING"
+        echo "TrunkSize: $TRUNK_SIZE"
+        echo "e4m3_exponent_bias: $E4M3"
+        echo "e5m2_exponent_bias: $E5M2"
         echo "Results already present. Skipping."
 
         # Append the existing row to the temporary CSV
-        echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRAIN_TIME,$TEST_ACC" >> "$TEMP_CSV"
+        echo "$SEED,$LUT,$EPOCH,$EARLYSTOPPING,$ROUNDING,$FPMode,$MODEL,$DATASET,$TRUNK_SIZE,$E4M3,$E5M2,$TRAIN_TIME,$TEST_ACC" \
+          >> "$TEMP_CSV"
     fi
 
     # Increment the line counter

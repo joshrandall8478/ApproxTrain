@@ -55,9 +55,7 @@ void DenseamFunctor<GpuDevice, T>::operator()(
     const size_t lda = k;
     const size_t ldb = n;
     const size_t ldc = n;
-    dim3 blockSize(16, 16, 1);
-    dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, weight_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, false, false, accum_mode, trunk_size);
+    GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, weight_data, ldb, output, ldc, mul_lut, mode, false, false, accum_mode, trunk_size);
 }
 
 // Functor for weight gradients
@@ -99,9 +97,7 @@ void DenseamWeightGradFunctor<GpuDevice, T>::operator()
     const size_t lda = k;
     const size_t ldb = n;
     const size_t ldc = n;
-    dim3 blockSize(16, 16, 1);
-    dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, grad_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode, trunk_size);
+    GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, grad_data, ldb, output, ldc, mul_lut, mode, true, false, accum_mode, trunk_size);
     
 }
 
@@ -144,9 +140,7 @@ void DenseamInputGradFunctor<GpuDevice, T>::operator()
     const size_t lda = k;
     const size_t ldb = n;
     const size_t ldc = n;
-    dim3 blockSize(16, 16, 1);
-    dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, grad_data, lda, weight_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, false, true, accum_mode, trunk_size);
+    GEMM_LAUNCHER<T>(d, m, n, k, grad_data, lda, weight_data, ldb, output, ldc, mul_lut, mode, false, true, accum_mode, trunk_size);
 }
 
 // Template instantiations

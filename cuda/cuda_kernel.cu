@@ -156,10 +156,7 @@ void ConvamKernelLauncher(
         const int lda = k;
         const int ldb = n;
         const int ldc = n;
-        //const int size = m*n;
-        dim3 blockSize(16, 16, 1);
-        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-        GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode, trunk_size);
+        GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, mul_lut, mode, true, false, accum_mode, trunk_size);
         return;
     } else if (filter_row == in_row && filter_col== in_col &&
                padding == 1) {
@@ -170,10 +167,7 @@ void ConvamKernelLauncher(
          const int lda = k;
          const int ldb = out_depth;
          const int ldc = out_depth;
-         //const int size = m*n;
-         dim3 blockSize(16, 16, 1);
-         dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-         GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode, trunk_size);
+         GEMM_LAUNCHER<T>(d, m, n, k, input_data, lda, filter_data, ldb, output, ldc, mul_lut, mode, true, false, accum_mode, trunk_size);
          gpuErrchk( cudaPeekAtLastError() );
          gpuErrchk( cudaDeviceSynchronize() );
          return;
@@ -185,9 +179,7 @@ void ConvamKernelLauncher(
     const size_t lda = k;
     const size_t ldb = out_depth;
     const size_t ldc = out_depth;
-    dim3 blockSize(16, 16, 1);
-    dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, filter_data, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, true, false, accum_mode, trunk_size);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, filter_data, ldb, output, ldc, mul_lut, mode, true, false, accum_mode, trunk_size);
 
 }
 
@@ -494,9 +486,7 @@ void ConvamFilterGradKernelLauncher(
     const size_t lda = k;
     const size_t ldb = n;
     const size_t ldc = n;
-    dim3 blockSize(16, 16, 1);
-    dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad_data, ldb, out, ldc, blockSize, gridSize, mul_lut, mode, false, false, accum_mode, trunk_size);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, grad_data, ldb, out, ldc, mul_lut, mode, false, false, accum_mode, trunk_size);
 };
 
 template <typename T>
@@ -680,9 +670,7 @@ void ConvamInputGradKernelLauncher(
     reverseNswapdim23<T><<<grid_size,block_size>>>(filter_height, filter_width, input_channel, output_channel, rsfilter, filter_data);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchk( cudaDeviceSynchronize() );
-    dim3 blockSize(16, 16, 1);
-    dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
-    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, rsfilter, ldb, output, ldc, blockSize, gridSize, mul_lut, mode, false, true, accum_mode, trunk_size);
+    GEMM_LAUNCHER<T>(d, m, n, k, im2col, lda, rsfilter, ldb, output, ldc, mul_lut, mode, false, true, accum_mode, trunk_size);
 };
 
 template <typename T>

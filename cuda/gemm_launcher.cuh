@@ -42,8 +42,6 @@ void GEMM_LAUNCHER(
     size_t ldb,
     T* c,
     size_t ldc,
-    dim3 blockSize,
-    dim3 gridSize,
     approx_mul_lut<GPUDevice>& mul_lut,
     FloatMode mode,
     bool forward_pass,
@@ -51,7 +49,8 @@ void GEMM_LAUNCHER(
     AccumMode accum_mode,
     size_t trunk_size = 0
 ){
-
+    dim3 blockSize(16, 16, 1);
+    dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
     /* Note: FP8 quantization happens prior to GEMM operations, see cuda_kernel.cu */
     if (mul_lut.is_lut()){
         // using case for different float modes
@@ -69,7 +68,11 @@ void GEMM_LAUNCHER(
                     if (trunk_size == TILE_DIM) {
                         gemm_fp16_accumulate_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else if (trunk_size == TRUNK_DIM_32) {
+                        dim3 blockSize(TRUNK_DIM_32, TRUNK_DIM_32, 1);
+                        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
                         gemm_fp16_accumulate_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    } else if (trunk_size == TRUNK_DIM_64) {
+                        gemm_fp16_accumulate_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else {
                         gemm_fp16_accumulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
@@ -78,8 +81,13 @@ void GEMM_LAUNCHER(
                     if (trunk_size == TILE_DIM) {
                         gemm_fp16_accumulate_rz_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else if (trunk_size == TRUNK_DIM_32) {
+                        dim3 blockSize(TRUNK_DIM_32, TRUNK_DIM_32, 1);
+                        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
                         gemm_fp16_accumulate_rz_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                    } else {
+                    } else if (trunk_size == TRUNK_DIM_64) {
+                        gemm_fp16_accumulate_rz_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    } else
+                    {
                         gemm_fp16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
                     break;
@@ -87,8 +95,13 @@ void GEMM_LAUNCHER(
                     if (trunk_size == TILE_DIM) {
                         gemm_bf16_accumulate_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else if (trunk_size == TRUNK_DIM_32) {
+                        dim3 blockSize(32, 32, 1);
+                        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
                         gemm_bf16_accumulate_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                    } else {
+                    } else if (trunk_size == TRUNK_DIM_64) {
+                        gemm_bf16_accumulate_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    }
+                    else {
                         gemm_bf16_accumulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
                     break;
@@ -96,8 +109,13 @@ void GEMM_LAUNCHER(
                     if (trunk_size == TILE_DIM) {
                         gemm_bf16_accumulate_rz_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else if (trunk_size == TRUNK_DIM_32) {
+                        dim3 blockSize(TRUNK_DIM_32, TRUNK_DIM_32, 1);
+                        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
                         gemm_bf16_accumulate_rz_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                    } else {
+                    } else if (trunk_size == TRUNK_DIM_64) {
+                        gemm_bf16_accumulate_rz_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    } else
+                    {
                         gemm_bf16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
                     break;
@@ -145,7 +163,17 @@ void GEMM_LAUNCHER(
                 switch (accum_mode)
                 {
                         case AccumMode::RNE:
-                        gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        if (trunk_size == TILE_DIM) {
+                            gemm_accumulate_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        } else if (trunk_size == TRUNK_DIM_32) {
+                            dim3 blockSize(TRUNK_DIM_32, TRUNK_DIM_32, 1);
+                            dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
+                            gemm_accumulate_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        } else if (trunk_size == TRUNK_DIM_64) {
+                            gemm_accumulate_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        } else {
+                            gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
                         break;
                         case AccumMode::RZ:
                         gemm_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
@@ -173,7 +201,11 @@ void GEMM_LAUNCHER(
                     if (trunk_size == TILE_DIM) {
                         gemm_fp16_accumulate_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else if (trunk_size == TRUNK_DIM_32) {
+                        dim3 blockSize(TRUNK_DIM_32, TRUNK_DIM_32, 1);
+                        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
                         gemm_fp16_accumulate_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    } else if (trunk_size == TRUNK_DIM_64) {
+                        gemm_fp16_accumulate_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else {
                         gemm_fp16_accumulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
@@ -182,7 +214,13 @@ void GEMM_LAUNCHER(
                     if (trunk_size == TILE_DIM) {
                         gemm_fp16_accumulate_rz_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else if (trunk_size == TRUNK_DIM_32) {
+                        dim3 blockSize(TRUNK_DIM_32, TRUNK_DIM_32, 1);
+                        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
                         gemm_fp16_accumulate_rz_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    } else if (trunk_size == TRUNK_DIM_64) {
+                        gemm_fp16_accumulate_rz_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    } else if (trunk_size != 0) {
+                        gemm_fp16_accumulate_rz_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
                     } else {
                         gemm_fp16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
@@ -191,8 +229,13 @@ void GEMM_LAUNCHER(
                     if (trunk_size == TILE_DIM) {
                         gemm_bf16_accumulate_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else if (trunk_size == TRUNK_DIM_32) {
+                        dim3 blockSize(32, 32, 1);
+                        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
                         gemm_bf16_accumulate_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                    } else {
+                    } else if (trunk_size == TRUNK_DIM_64) {
+                        gemm_bf16_accumulate_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    }
+                    else {
                         gemm_bf16_accumulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
                     break;
@@ -200,8 +243,13 @@ void GEMM_LAUNCHER(
                     if (trunk_size == TILE_DIM) {
                         gemm_bf16_accumulate_rz_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     } else if (trunk_size == TRUNK_DIM_32) {
+                        dim3 blockSize(TRUNK_DIM_32, TRUNK_DIM_32, 1);
+                        dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
                         gemm_bf16_accumulate_rz_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
-                    } else {
+                    } else if (trunk_size == TRUNK_DIM_64) {
+                        gemm_bf16_accumulate_rz_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                    } else
+                    {
                         gemm_bf16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
                     break;
@@ -242,7 +290,19 @@ void GEMM_LAUNCHER(
                 switch (accum_mode)
                 {
                     case AccumMode::RNE:
-                    gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        if (trunk_size == TILE_DIM) {
+                            gemm_accumulate_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        } else if (trunk_size == TRUNK_DIM_32) {
+                            dim3 blockSize(TRUNK_DIM_32, TRUNK_DIM_32, 1);
+                            dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
+                            gemm_accumulate_trunksize_32<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        } else if (trunk_size == TRUNK_DIM_64) {
+                            gemm_accumulate_trunksize_64<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        } else if (trunk_size != 0) {
+                            gemm_accumulate_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
                     break;
                     case AccumMode::RZ:
                     gemm_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);

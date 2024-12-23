@@ -4,7 +4,7 @@ from python.keras.layers.am_convolutional import AMConv2D
 from models.resnet import build_resnet_cifar
 
 # Build the ResNet model (e.g., ResNet20 for CIFAR)
-model = build_resnet_cifar(input_shape=(32, 32, 3), num_classes=10, depth=20, lut_file='', FPMode="FP8HYB")
+model = build_resnet_cifar(input_shape=(32, 32, 3), num_classes=10, depth=20, lut_file='', FPMode="FP32", AccumMode="RNE", trunk_size=24)
 
 # Extract configurations of AMConv2D layers, rebuild layers, and also rebuild corresponding Conv2D layers
 AMConv_layers = []
@@ -24,6 +24,11 @@ for layer in model.layers:
         conv_config = config.copy()
         conv_config.pop('mant_mul_lut', None)
         conv_config.pop('FPMode', None)
+        conv_config.pop('AccumMode', None)
+        conv_config.pop('trunk_size', None)
+        conv_config.pop('e4m3_exponent_bias', None)
+        conv_config.pop('e5m2_exponent_bias', None)
+
         Conv2D_layer = tf.keras.layers.Conv2D(**conv_config)
         
         AMConv_layers.append(AMConv)
@@ -40,7 +45,11 @@ for layer in model.layers:
 print_e = True
 # Iterate over AMConv2D layers, Conv2D layers, and input shapes
 for AMConv, Conv2D, input_shape in zip(AMConv_layers, Conv2D_layers, input_shapes):
-    # Initialize weights of AMConv2D and Conv2D layers
+    # Initialize weights of AMConv2D and Conv2D layers using same seed
+    # set seed
+    tf.random.set_seed(0)
+    # set np seed
+    np.random.seed(0)
     AMConv.build(input_shape)
     Conv2D.build(input_shape)
     

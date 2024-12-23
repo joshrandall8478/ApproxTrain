@@ -57,8 +57,17 @@ def main():
     parser.add_argument("--DATASET", type=str, required=True, choices=['mnist', 'cifar10', 'cifar100'], help="Dataset to use for training")
     # add a new args to specify test mode
     parser.add_argument("--TEST", action='store_true', default=False, help="Test the model")
+    # add a new arg to specify trunk_size, default = 0, must be 0 or 16 or 32
+    parser.add_argument("--trunk_size", type=int, default=0, help="Trunk size")
+    # add a new arg to specify e4m3_exponent_bias, default = 7
+    parser.add_argument("--e4m3_exponent_bias", type=int, default=7, help="e4m3 exponent bias")
+    # add a new arg to specify e5m2_exponent_bias, default = 31
+    parser.add_argument("--e5m2_exponent_bias", type=int, default=31, help="e5m2 exponent bias")
     args = parser.parse_args()
-    
+    trunk_size = args.trunk_size
+    e4m3_exponent_bias = args.e4m3_exponent_bias
+    e5m2_exponent_bias = args.e5m2_exponent_bias
+
     lut_file_name = re.match(r"(.+)\.bin$", os.path.basename(args.LUT)).group(1) if args.LUT else "default"
     lut_file = args.LUT
 
@@ -78,14 +87,14 @@ def main():
     with strategy.scope():
         if args.MODEL.startswith('lenet'):
             if args.MODEL == 'lenet5' or args.MODEL == 'lenet300100':
-                model = build_lenet(args.MODEL, input_shape, num_classes, lut_file, args.FPMode, rnd)
+                model = build_lenet(args.MODEL, input_shape, num_classes, lut_file, args.FPMode, rnd, trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)
             else:
                 raise ValueError(f"Unsupported LeNet model: {args.MODEL}")
             optimizer = tf.keras.optimizers.Adam()
             loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
         elif args.MODEL.startswith('resnet'):
             depth = int(args.MODEL.replace('resnet', ''))
-            model = build_resnet_cifar(input_shape=input_shape, num_classes=num_classes, depth=depth, lut_file=lut_file, FPMode=args.FPMode, AccumMode=rnd)
+            model = build_resnet_cifar(input_shape=input_shape, num_classes=num_classes, depth=depth, lut_file=lut_file, FPMode=args.FPMode, AccumMode=rnd, trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)
             # Use SGD with momentum for ResNet
             # learning_rate = 0.1
             learning_rate = tf.keras.optimizers.schedules.PiecewiseConstantDecay(\
@@ -116,9 +125,9 @@ def main():
     os.makedirs("save/training_stats", exist_ok=True)
 
     # Callbacks
-    checkpoint_path = f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}.h5"
+    checkpoint_path = f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_{trunk_size}_{e4m3_exponent_bias}_{e5m2_exponent_bias}.h5"
     if args.EARLYSTOPPING:
-        checkpoint_path = f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_earlystopping.h5"
+        checkpoint_path = f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_{trunk_size}_{e4m3_exponent_bias}_{e5m2_exponent_bias}_earlystopping.h5"
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_path,
         monitor='val_accuracy',
@@ -171,6 +180,10 @@ def main():
     # Evaluation
 
     # test_loss, test_accuracy = model.evaluate(ds_test)
+
+    model.load_weights(f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_{trunk_size}_{e4m3_exponent_bias}_{e5m2_exponent_bias}.h5")
+    if args.EARLYSTOPPING:
+        model.load_weights(f"save/checkpoints/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_{trunk_size}_{e4m3_exponent_bias}_{e5m2_exponent_bias}_earlystopping.h5")
     if args.MODEL == 'lenet5' or args.MODEL == 'lenet300100':
         test_loss, test_accuracy = model.evaluate(ds_test, steps=ds_test.n // ds_test.batch_size)
         print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy}")
@@ -190,9 +203,9 @@ def main():
         "test_accuracy": test_accuracy,
         "avg_batch_time": batch_time_logger.avg_batch_time
     }
-    stats_path = f"save/training_stats/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}.json"
+    stats_path = f"save/training_stats/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_{trunk_size}_{e4m3_exponent_bias}_{e5m2_exponent_bias}.json"
     if args.EARLYSTOPPING:
-        stats_path = f"save/training_stats/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_earlystopping.json"
+        stats_path = f"save/training_stats/{args.MODEL}_{args.DATASET}_{lut_file_name}_{args.FPMode}_{rnd}_{trunk_size}_{e4m3_exponent_bias}_{e5m2_exponent_bias}_earlystopping.json"
     with open(stats_path, "w") as f:
         json.dump(training_stats, f)
     print(f"Training statistics saved to {stats_path}")

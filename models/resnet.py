@@ -6,7 +6,7 @@ from tensorflow.keras.layers import Conv2D, BatchNormalization, ReLU, Add, Globa
 from python.keras.layers.am_convolutional import AMConv2D
 from python.keras.layers.amdenselayer import denseam
 
-def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=True, weight_decay=1e-4, batch_norm_params=None, tensorflow_original=False,AccumMode='RNE'):
+def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=True, weight_decay=1e-4, batch_norm_params=None, tensorflow_original=False,AccumMode='RNE', trunk_size=0, e4m3_exponent_bias=7, e5m2_exponent_bias=31):
 
     """Defines a single ResNet unit (block) without using class definitions."""
     if batch_norm_params is None:
@@ -29,14 +29,14 @@ def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=T
                                  use_bias=False, kernel_regularizer=kernel_regularizer)(x) \
                 if tensorflow_original else \
                 AMConv2D(filters, kernel_size=1, strides=stride, padding='same', use_bias= False, 
-                         mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode)(x)
+                         mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode,trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)(x)
     
     # First Conv2D
     x = Conv2D(filters, kernel_size=3, strides=stride, padding='same',
                       use_bias=False, kernel_regularizer=kernel_regularizer)(x) \
         if tensorflow_original else \
         AMConv2D(filters, kernel_size=3, strides=stride, padding='same', use_bias= False,\
-                 kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode)(x)
+                 kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode,trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)(x)
     
     # Second BatchNorm and ReLU
     x = BatchNormalization(**batch_norm_params)(x)
@@ -47,7 +47,7 @@ def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=T
                       use_bias=False, kernel_regularizer=kernel_regularizer)(x)\
         if tensorflow_original else \
         AMConv2D(filters, kernel_size=3, strides=1, padding='same', use_bias= False,\
-                    kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode)(x)
+                    kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode,trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)(x)
     
     # Add shortcut connection
     if shortcut_connection:
@@ -55,7 +55,7 @@ def resnet_unit(inputs, filters, stride, lut_file, FPMode, shortcut_connection=T
     
     return x
 
-def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, AccumMode, weight_decay=1e-4,tensorflow_original=False):
+def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, AccumMode, weight_decay=1e-4, trunk_size=0, e4m3_exponent_bias=7, e5m2_exponent_bias=31, tensorflow_original=False):
     """Builds the ResNet model using the Keras Functional API."""
     if num_layers not in (20, 32, 44, 56, 110, 1202):
         raise ValueError('num_layers must be one of 20, 32, 44, 56, 110, or 1202.')
@@ -73,24 +73,24 @@ def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, AccumMo
                       use_bias=False, kernel_regularizer=kernel_regularizer)(inputs)\
         if tensorflow_original else \
         AMConv2D(16, kernel_size=3, strides=1, padding='same', use_bias= False,\
-                 kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode,AccumMode=AccumMode)(inputs)
+                 kernel_regularizer=kernel_regularizer, mant_mul_lut=lut_file, FPMode=FPMode,AccumMode=AccumMode,trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)(inputs)
     
     # First block
     for _ in range(num_units):
         x = resnet_unit(x, filters=16, stride=1, lut_file=lut_file, FPMode=FPMode, shortcut_connection=True,
-                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode)
+                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode,trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)
     
     # Second block
     for i in range(num_units):
         stride = 2 if i == 0 else 1
         x = resnet_unit(x, filters=32, stride=stride, lut_file=lut_file, FPMode=FPMode, shortcut_connection=True,
-                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode)
+                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode,trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)
     
     # Third block
     for i in range(num_units):
         stride = 2 if i == 0 else 1
         x = resnet_unit(x, filters=64, stride=stride, lut_file=lut_file, FPMode=FPMode, shortcut_connection=True,
-                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode)
+                        weight_decay=weight_decay, batch_norm_params=batch_norm_params, tensorflow_original=tensorflow_original,AccumMode=AccumMode,trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)
     
     # Final BatchNorm and ReLU
     x = BatchNormalization(**batch_norm_params)(x)
@@ -104,12 +104,14 @@ def build_resnet(input_shape, num_classes, num_layers, lut_file, FPMode, AccumMo
                            kernel_regularizer=kernel_regularizer)(x) \
         if tensorflow_original else \
         denseam(num_classes, activation='softmax', kernel_regularizer=kernel_regularizer,\
-                mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode)(x)
+                mant_mul_lut=lut_file, FPMode=FPMode, AccumMode=AccumMode,trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias)(x)
     
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
 
     return model
 
-def build_resnet_cifar(input_shape, num_classes, depth, lut_file, FPMode, AccumMode, tensorflow_original=False):
+def build_resnet_cifar(input_shape, num_classes, depth, lut_file, FPMode, AccumMode, trunk_size=0, e4m3_exponent_bias=7, e5m2_exponent_bias=31, tensorflow_original=False):
     """Helper function to build ResNet models for CIFAR datasets."""
-    return build_resnet(input_shape, num_classes, num_layers=depth, lut_file=lut_file, FPMode=FPMode, AccumMode=AccumMode, weight_decay=1e-4, tensorflow_original=tensorflow_original)
+    return build_resnet(input_shape, num_classes, num_layers=depth, lut_file=lut_file, \
+                        FPMode=FPMode, AccumMode=AccumMode, weight_decay=1e-4, \
+                            trunk_size=trunk_size, e4m3_exponent_bias=e4m3_exponent_bias, e5m2_exponent_bias=e5m2_exponent_bias, tensorflow_original=tensorflow_original)

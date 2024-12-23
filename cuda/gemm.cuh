@@ -2,7 +2,24 @@
 #define GEMM_CUH
 #define TILE_DIM 16
 #define TRUNK_DIM_32 32
+#define TRUNK_DIM_64 64
 /* below kernels are intended for trunk based accumulation*/
+template <typename T>
+__global__ void gemm_accumulate_trunksize_16(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+template <typename T>
+__global__ void gemm_accumulate_trunksize_32(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+template <typename T>
+__global__ void gemm_accumulate_trunksize_64(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+template <typename T>
+__global__ void gemm_accumulate_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x);  
 template <typename T>
 __global__ void gemm_fp16_accumulate_trunksize_16(size_t m, size_t n, size_t k,
    const T *a, size_t lda, const T *b, size_t ldb,
@@ -28,6 +45,10 @@ template <typename T>
 __global__ void gemm_fp16_accumulate_rz_trunksize_64(size_t m, size_t n, size_t k,
    const T *a, size_t lda, const T *b, size_t ldb,
    T *c, size_t ldc);
+template <typename T>
+__global__ void gemm_fp16_accumulate_rz_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x);
 template <typename T>
 __global__ void gemm_bf16_accumulate_rz_trunksize_16(size_t m, size_t n, size_t k,
    const T *a, size_t lda, const T *b, size_t ldb,
