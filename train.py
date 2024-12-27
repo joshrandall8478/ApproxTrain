@@ -50,7 +50,7 @@ def main():
     parser.add_argument("--LUT", type=str, help="Path to the LUT file")
     parser.add_argument("--EPOCH", type=int, default=200, help="Number of epochs")
     parser.add_argument("--EARLYSTOPPING", action='store_true', help="Enable early stopping")
-    parser.add_argument("--ROUNDING", type=str, required=True, choices=['RNE','RZ','FP16RNE','FP16RZ', 'BF16RNE', 'BF16RZ'], help="Rounding mode (you have to recompile ApproxTrain if you change the rounding mode)")
+    parser.add_argument("--ROUNDING", type=str, required=True, choices=['RNE','RZ','FP16RNE','FP16RZ', 'BF16RNE', 'BF16RZ', 'SEAFP16RZ', 'SEABF16RNE', 'SEABF16RZ'], help="Rounding mode (you have to recompile ApproxTrain if you change the rounding mode)")
     # Add a new argument to specify the FPMode
     parser.add_argument("--FPMode", type=str, required=True, choices=['FP32', 'FP16', 'BF16', 'FP8E5M2', 'FP8HYB'], help="FPMode to use for training")
     parser.add_argument("--MODEL", type=str, required=True, choices=['lenet300100', 'lenet5', 'resnet20', 'resnet32', 'resnet44', 'resnet56', 'resnet110', 'resnet1202'], help="Model architecture to train")

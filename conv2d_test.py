@@ -4,7 +4,7 @@ from python.keras.layers.am_convolutional import AMConv2D
 from models.resnet import build_resnet_cifar
 
 # Build the ResNet model (e.g., ResNet20 for CIFAR)
-model = build_resnet_cifar(input_shape=(32, 32, 3), num_classes=10, depth=20, lut_file='', FPMode="FP32", AccumMode="RNE", trunk_size=24)
+model = build_resnet_cifar(input_shape=(32, 32, 3), num_classes=10, depth=20, lut_file='', FPMode="FP32", AccumMode="SEARNE", trunk_size=16)
 
 # Extract configurations of AMConv2D layers, rebuild layers, and also rebuild corresponding Conv2D layers
 AMConv_layers = []

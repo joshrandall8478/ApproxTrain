@@ -1614,4 +1614,476 @@ template __global__ void gemm_accumulate_trunksize_x<float>(size_t m, size_t n, 
 template __global__ void gemm_accumulate_trunksize_x<int32>(size_t m, size_t n, size_t k,
      const int32 *a, size_t lda, const int32 *b, size_t ldb,
      int32 *c, size_t ldc, size_t x);
+
+
+template <typename T>
+__global__ void sea_gemm_accumulate_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x) {
+     T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     int accumulate_step = 0;
+     T positive_accumulator(0);
+     T negative_accumulator(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           __syncthreads();
+     
+           for (int n = 0; n < TILE_DIM; ++n){
+               // use am simulator
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // get sign of mul
+               bool negative = mul < T(0);
+               positive_accumulator = !negative ? fp32_add(positive_accumulator, mul) : positive_accumulator;
+               negative_accumulator = negative ? fp32_add(negative_accumulator, mul) : negative_accumulator;
+               accumulate_step+=1;
+               if (accumulate_step == x) {
+                   T pos_neg_sum = fp32_add(positive_accumulator, negative_accumulator);
+                   value = fp32_add(pos_neg_sum, value);
+                   positive_accumulator = T(0);
+                   negative_accumulator = T(0);
+                   accumulate_step = 0;
+               }
+           }
+           __syncthreads();
+     }
+     // if remaining elements are less than x
+     if (accumulate_step != 0) {
+           T pos_neg_sum = fp32_add(positive_accumulator, negative_accumulator);
+           value = fp32_add(pos_neg_sum, value);
+     }
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+   }
+template __global__ void sea_gemm_accumulate_trunksize_x<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc, size_t x);
+template __global__ void sea_gemm_accumulate_trunksize_x<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc, size_t x);
+template <typename T>
+__global__ void sea_gemm_fp16_accumulate_rz_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x) {
+     T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     int accumulate_step = 0;
+     T positive_accumulator = T(0);
+     T negative_accumulator = T(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           __syncthreads();
+     
+           for (int n = 0; n < TILE_DIM; ++n){
+               // use am simulator
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // get sign of mul
+               bool negative = mul < T(0);
+               positive_accumulator = !negative ? half_add_rz(positive_accumulator, mul) : positive_accumulator;
+               negative_accumulator = negative ? half_add_rz(negative_accumulator, mul) : negative_accumulator;
+               accumulate_step+=1;
+               if (accumulate_step == x) {
+                   T pos_neg_sum = half_add_rz(positive_accumulator, negative_accumulator);
+                   value = half_add_rz(pos_neg_sum, value);
+                   positive_accumulator = T(0);
+                   negative_accumulator = T(0);
+                   accumulate_step = 0;
+               }
+           }
+           __syncthreads();
+     }
+     // if remaining elements are less than x
+     if (accumulate_step != 0) {
+           T pos_neg_sum = half_add_rz(positive_accumulator, negative_accumulator);
+           value = half_add_rz(pos_neg_sum, value);
+     }
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+     }
+template __global__ void sea_gemm_fp16_accumulate_rz_trunksize_x<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc, size_t x);
+template __global__ void sea_gemm_fp16_accumulate_rz_trunksize_x<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc, size_t x);
+
+template <typename T>
+__global__ void sea_gemm_accumulate(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc) {     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     T positive_accumulator(0);
+     T negative_accumulator(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+
+           for (int n = 0; n < TILE_DIM; ++n){
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // get sign of mul
+               bool negative = mul < T(0);
+               positive_accumulator = !negative ? fp32_add(positive_accumulator, mul) : positive_accumulator;
+               negative_accumulator = negative ? fp32_add(negative_accumulator, mul) : negative_accumulator;
+           }
+
+           __syncthreads();
+     }
+     
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = fp32_add(positive_accumulator, negative_accumulator);
+     }
+   }
+template __global__ void sea_gemm_accumulate<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc);
+template __global__ void sea_gemm_accumulate<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc);
+
+template <typename T>
+__global__ void sea_gemm_fp16_accumulate_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc) {     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     T positive_accumulator(0);
+     T negative_accumulator(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+
+           for (int n = 0; n < TILE_DIM; ++n){
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // get sign of mul
+               bool negative = mul < T(0);
+               positive_accumulator = !negative ? half_add_rz(positive_accumulator, mul) : positive_accumulator;
+               negative_accumulator = negative ? half_add_rz(negative_accumulator, mul) : negative_accumulator;
+           }
+
+           __syncthreads();
+     }
+     
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = half_add_rz(positive_accumulator, negative_accumulator);
+     }
+   }
+template __global__ void sea_gemm_fp16_accumulate_rz<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc);
+template __global__ void sea_gemm_fp16_accumulate_rz<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc);
+
+template <typename T>
+__global__ void sea_gemm_bf16_accumulate_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc) {
+
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     T positive_accumulator(0);
+     T negative_accumulator(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+
+           for (int n = 0; n < TILE_DIM; ++n){
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // get sign of mul
+               bool negative = mul < T(0);
+               positive_accumulator = !negative ? bf16_add_rz(positive_accumulator, mul) : positive_accumulator;
+               negative_accumulator = negative ? bf16_add_rz(negative_accumulator, mul) : negative_accumulator;
+           }
+
+           __syncthreads();
+     }
+     
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = bf16_add_rz(positive_accumulator, negative_accumulator);
+     }
+   }
+template __global__ void sea_gemm_bf16_accumulate_rz<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc);
+template __global__ void sea_gemm_bf16_accumulate_rz<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc);
+
+template <typename T>
+__global__ void sea_gemm_bf16_accmulate(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc) {
+     
+          int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+          int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+          
+          __shared__ T As[TILE_DIM][TILE_DIM];
+          __shared__ T Bs[TILE_DIM][TILE_DIM];
+          T positive_accumulator(0);
+          T negative_accumulator(0);
+          for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+          
+               if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                    As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+               }
+               else{
+                    As[threadIdx.y][threadIdx.x] = T(0);
+               }
+          
+               if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                    Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+               }
+               else{
+                    Bs[threadIdx.y][threadIdx.x] = T(0);
+               }
+          
+     
+               for (int n = 0; n < TILE_DIM; ++n){
+                    T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+                    // get sign of mul
+                    bool negative = mul < T(0);
+                    positive_accumulator = !negative ? bf16_add(positive_accumulator, mul) : positive_accumulator;
+                    negative_accumulator = negative ? bf16_add(negative_accumulator, mul) : negative_accumulator;
+               }
+     
+               __syncthreads();
+          }
+          
+          if (Row < m && Col < n) {
+               c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = bf16_add(positive_accumulator, negative_accumulator);
+          }
+     }
+template __global__ void sea_gemm_bf16_accmulate<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc);
+template __global__ void sea_gemm_bf16_accmulate<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc);
+
+/* trunk-based accumulation */
+template <typename T>
+__global__ void sea_gemm_bf16_accumulate_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x) {
+     T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     int accumulate_step = 0;
+     T positive_accumulator(0);
+     T negative_accumulator(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           __syncthreads();
+     
+           for (int n = 0; n < TILE_DIM; ++n){
+               // use am simulator
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // get sign of mul
+               bool negative = mul < T(0);
+               positive_accumulator = !negative ? bf16_add(positive_accumulator, mul) : positive_accumulator;
+               negative_accumulator = negative ? bf16_add(negative_accumulator, mul) : negative_accumulator;
+               accumulate_step+=1;
+               if (accumulate_step == x) {
+                   T pos_neg_sum = bf16_add(positive_accumulator, negative_accumulator);
+                   value = bf16_add(pos_neg_sum, value);
+                   positive_accumulator = T(0);
+                   negative_accumulator = T(0);
+                   accumulate_step = 0;
+               }
+           }
+           __syncthreads();
+     }
+     // if remaining elements are less than x
+     if (accumulate_step != 0) {
+           T pos_neg_sum = bf16_add(positive_accumulator, negative_accumulator);
+           value = bf16_add(pos_neg_sum, value);
+     }
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+template __global__ void sea_gemm_bf16_accumulate_trunksize_x<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc, size_t x);
+template __global__ void sea_gemm_bf16_accumulate_trunksize_x<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc, size_t x);
+
+template <typename T>
+__global__ void sea_gemm_bf16_accumulate_rz_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x) {
+     T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     int accumulate_step = 0;
+     T positive_accumulator(0);
+     T negative_accumulator(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           __syncthreads();
+     
+           for (int n = 0; n < TILE_DIM; ++n){
+               // use am simulator
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // get sign of mul
+               bool negative = mul < T(0);
+               positive_accumulator = !negative ? bf16_add_rz(positive_accumulator, mul) : positive_accumulator;
+               negative_accumulator = negative ? bf16_add_rz(negative_accumulator, mul) : negative_accumulator;
+               accumulate_step+=1;
+               if (accumulate_step == x) {
+                   T pos_neg_sum = bf16_add_rz(positive_accumulator, negative_accumulator);
+                   value = bf16_add_rz(pos_neg_sum, value);
+                   positive_accumulator = T(0);
+                   negative_accumulator = T(0);
+                   accumulate_step = 0;
+               }
+           }
+           __syncthreads();
+     }
+     // if remaining elements are less than x
+     if (accumulate_step != 0) {
+           T pos_neg_sum = bf16_add_rz(positive_accumulator, negative_accumulator);
+           value = bf16_add_rz(pos_neg_sum, value);
+     }
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+template __global__ void sea_gemm_bf16_accumulate_rz_trunksize_x<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc, size_t x);
+template __global__ void sea_gemm_bf16_accumulate_rz_trunksize_x<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc, size_t x);
 /* end of new implementation*/

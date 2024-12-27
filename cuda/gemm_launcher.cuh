@@ -49,6 +49,7 @@ void GEMM_LAUNCHER(
     AccumMode accum_mode,
     size_t trunk_size = 0
 ){
+
     dim3 blockSize(16, 16, 1);
     dim3 gridSize((n + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y, 1);
     /* Note: FP8 quantization happens prior to GEMM operations, see cuda_kernel.cu */
@@ -119,6 +120,30 @@ void GEMM_LAUNCHER(
                         gemm_bf16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
                     break;
+                    
+                    case AccumMode::SEAFP16RZ:
+                        if (trunk_size != 0) {
+                            sea_gemm_fp16_accumulate_rz_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            sea_gemm_fp16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
+                    break;
+                    case AccumMode::SEABF16:
+                        if (trunk_size != 0) {
+                            sea_gemm_bf16_accumulate_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            sea_gemm_bf16_accmulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
+                    break;
+
+                    case AccumMode::SEABF16RZ:
+                        if (trunk_size != 0) {
+                            sea_gemm_bf16_accumulate_rz_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            sea_gemm_bf16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
+                    break;
+
                     default:
                     gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     break;
@@ -162,6 +187,13 @@ void GEMM_LAUNCHER(
                 // use gemm no lut is supported, if you really want to use some approximation, a behavior model is required that is C/C++ based and can be used in the kernel
                 switch (accum_mode)
                 {
+                        case AccumMode::SEARNE:
+                        if (trunk_size != 0) {
+                            sea_gemm_accumulate_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
+                        break;
                         case AccumMode::RNE:
                         if (trunk_size == TILE_DIM) {
                             gemm_accumulate_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
@@ -253,6 +285,28 @@ void GEMM_LAUNCHER(
                         gemm_bf16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     }
                     break;
+                    case AccumMode::SEAFP16RZ:
+                        if (trunk_size != 0) {
+                            sea_gemm_fp16_accumulate_rz_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            sea_gemm_fp16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
+                    break;
+                    case AccumMode::SEABF16:
+                        if (trunk_size != 0) {
+                            sea_gemm_bf16_accumulate_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            sea_gemm_bf16_accmulate<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
+                    break;
+
+                    case AccumMode::SEABF16RZ:
+                        if (trunk_size != 0) {
+                            sea_gemm_bf16_accumulate_rz_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            sea_gemm_bf16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
+                    break;
                     default:
                     gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                     break;
@@ -289,6 +343,13 @@ void GEMM_LAUNCHER(
             case FloatMode::FP32:
                 switch (accum_mode)
                 {
+                    case AccumMode::SEARNE:
+                        if (trunk_size != 0) {
+                            sea_gemm_accumulate_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
+                        } else {
+                            gemm<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
+                        }
+                        break;
                     case AccumMode::RNE:
                         if (trunk_size == TILE_DIM) {
                             gemm_accumulate_trunksize_16<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);

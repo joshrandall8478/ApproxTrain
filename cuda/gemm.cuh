@@ -4,6 +4,51 @@
 #define TRUNK_DIM_32 32
 #define TRUNK_DIM_64 64
 /* below kernels are intended for trunk based accumulation*/
+
+// SEARNE trunk_size is 0
+template <typename T>
+__global__ void sea_gemm_accumulate(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+// SEAFP16RZ trunk_size is 0
+template <typename T>
+__global__ void sea_gemm_fp16_accumulate_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+// SEABF16RZ trunk_size is 0
+template <typename T>
+__global__ void sea_gemm_bf16_accumulate_rz(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+// SEABF16 trunk_size is 0
+template <typename T>
+__global__ void sea_gemm_bf16_accmulate(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc);
+/* trunk-based accumulation */
+// SEABF16 trunk_size is x
+template <typename T>
+__global__ void sea_gemm_bf16_accumulate_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x);
+// SEABF16RZ trunk_size is x
+template <typename T>
+__global__ void sea_gemm_bf16_accumulate_rz_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x);
+
+
+
+
+template <typename T>
+__global__ void sea_gemm_accumulate_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x); 
+template <typename T>
+__global__ void sea_gemm_fp16_accumulate_rz_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x); 
+
 template <typename T>
 __global__ void gemm_accumulate_trunksize_16(size_t m, size_t n, size_t k,
    const T *a, size_t lda, const T *b, size_t ldb,
