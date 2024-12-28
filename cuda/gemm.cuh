@@ -5,6 +5,15 @@
 #define TRUNK_DIM_64 64
 /* below kernels are intended for trunk based accumulation*/
 
+template <typename T>
+__global__ void gemm_bf16_accumulate_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x);
+template <typename T>
+__global__ void gemm_bf16_accumulate_rz_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x);
+
 // SEARNE trunk_size is 0
 template <typename T>
 __global__ void sea_gemm_accumulate(size_t m, size_t n, size_t k,

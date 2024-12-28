@@ -2086,4 +2086,127 @@ template __global__ void sea_gemm_bf16_accumulate_rz_trunksize_x<float>(size_t m
 template __global__ void sea_gemm_bf16_accumulate_rz_trunksize_x<int32>(size_t m, size_t n, size_t k,
      const int32 *a, size_t lda, const int32 *b, size_t ldb,
      int32 *c, size_t ldc, size_t x);
+
+template <typename T>
+__global__ void gemm_bf16_accumulate_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x) {
+          T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     int accumulate_step = 0;
+     T local_accumulator(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           __syncthreads();
+     
+           for (int n = 0; n < TILE_DIM; ++n){
+               // use am simulator
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // Accumulate the result
+               local_accumulator = bf16_add(local_accumulator, mul);
+               accumulate_step+=1;
+               if (accumulate_step == x) {
+                   value = bf16_add(local_accumulator, value);
+                   local_accumulator = T(0);
+                   accumulate_step = 0;
+               }
+           }
+           __syncthreads();
+     }
+     // if remaining elements are less than x
+     if (local_accumulator != T(0)) {
+           value = bf16_add(local_accumulator, value);
+     }
+
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+template __global__ void gemm_bf16_accumulate_trunksize_x<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc, size_t x);
+template __global__ void gemm_bf16_accumulate_trunksize_x<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc, size_t x);
+template <typename T>
+__global__ void gemm_bf16_accumulate_rz_trunksize_x(size_t m, size_t n, size_t k,
+   const T *a, size_t lda, const T *b, size_t ldb,
+   T *c, size_t ldc, size_t x) {
+          T value(0);
+     
+     int Row = blockIdx.y*TILE_DIM + threadIdx.y;
+     int Col = blockIdx.x*TILE_DIM + threadIdx.x;
+     
+     __shared__ T As[TILE_DIM][TILE_DIM];
+     __shared__ T Bs[TILE_DIM][TILE_DIM];
+     
+     int accumulate_step = 0;
+     T local_accumulator(0);
+     for (int i = 0; i < (TILE_DIM + k - 1)/TILE_DIM; ++i) {
+     
+           if (i*TILE_DIM + threadIdx.x < k && Row < m){
+                 As[threadIdx.y][threadIdx.x] = a[Row*lda + i*TILE_DIM + threadIdx.x];
+           }
+           else{
+                 As[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           if (i*TILE_DIM + threadIdx.y < k && Col < n){
+                 Bs[threadIdx.y][threadIdx.x] = b[(i*TILE_DIM + threadIdx.y)*ldb + Col];
+           }
+           else{
+                 Bs[threadIdx.y][threadIdx.x] = T(0);
+           }
+     
+           __syncthreads();
+     
+           for (int n = 0; n < TILE_DIM; ++n){
+               // use am simulator
+               T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
+               // Accumulate the result
+               local_accumulator = bf16_add_rz(local_accumulator, mul);
+               accumulate_step+=1;
+               if (accumulate_step == x) {
+                   value = bf16_add_rz(local_accumulator, value);
+                   local_accumulator = T(0);
+                   accumulate_step = 0;
+               }
+           }
+           __syncthreads();
+     }
+     // if remaining elements are less than x
+     if (local_accumulator != T(0)) {
+           value = bf16_add_rz(local_accumulator, value);
+     }
+
+     if (Row < m && Col < n) {
+           c[((blockIdx.y * blockDim.y  + threadIdx.y)*ldc) + (blockIdx.x * blockDim.x) + threadIdx.x] = value;
+     }
+}
+template __global__ void gemm_bf16_accumulate_rz_trunksize_x<float>(size_t m, size_t n, size_t k,
+     const float *a, size_t lda, const float *b, size_t ldb,
+     float *c, size_t ldc, size_t x);
+template __global__ void gemm_bf16_accumulate_rz_trunksize_x<int32>(size_t m, size_t n, size_t k,
+     const int32 *a, size_t lda, const int32 *b, size_t ldb,
+     int32 *c, size_t ldc, size_t x);
 /* end of new implementation*/
