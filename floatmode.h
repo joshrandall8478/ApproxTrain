@@ -19,7 +19,7 @@ enum class AccumMode {
     SEARNE,
     SEAFP16RZ,
     SEABF16RZ,
-    SEABF16
+    SEABF16RNE
 };
 inline std::string FloatModeToString(FloatMode mode) {
     switch (mode) {
@@ -73,8 +73,8 @@ inline std::string AccumModeToString(AccumMode mode) {
             return "SEAFP16RZ";
         case AccumMode::SEABF16RZ:
             return "SEABF16RZ";
-        case AccumMode::SEABF16:
-            return "SEABF16";
+        case AccumMode::SEABF16RNE:
+            return "SEABF16RNE";
         default:
             return "Unknown AccumMode";
     }
@@ -99,8 +99,8 @@ inline AccumMode StringToAccumMode(const std::string& mode) {
         return AccumMode::SEAFP16RZ;
     } else if (mode == "SEABF16RZ") {
         return AccumMode::SEABF16RZ;
-    } else if (mode == "SEABF16") {
-        return AccumMode::SEABF16;
+    } else if (mode == "SEABF16RNE") {
+        return AccumMode::SEABF16RNE;
     } else {
         return AccumMode::RNE;
     }

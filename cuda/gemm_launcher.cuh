@@ -131,7 +131,7 @@ void GEMM_LAUNCHER(
                             sea_gemm_fp16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                         }
                     break;
-                    case AccumMode::SEABF16:
+                    case AccumMode::SEABF16RNE:
                         if (trunk_size != 0) {
                             sea_gemm_bf16_accumulate_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
                         } else {
@@ -298,7 +298,7 @@ void GEMM_LAUNCHER(
                             sea_gemm_fp16_accumulate_rz<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc);
                         }
                     break;
-                    case AccumMode::SEABF16:
+                    case AccumMode::SEABF16RNE:
                         if (trunk_size != 0) {
                             sea_gemm_bf16_accumulate_trunksize_x<T><<<gridSize, blockSize, 0, d.stream()>>>(m, n, k, a, lda, b, ldb, c, ldc, trunk_size);
                         } else {
