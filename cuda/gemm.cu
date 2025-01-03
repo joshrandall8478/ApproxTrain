@@ -1775,7 +1775,7 @@ __global__ void sea_gemm_accumulate(size_t m, size_t n, size_t k,
            else{
                  Bs[threadIdx.y][threadIdx.x] = T(0);
            }
-     
+          __syncthreads();
 
            for (int n = 0; n < TILE_DIM; ++n){
                T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
@@ -1826,7 +1826,7 @@ __global__ void sea_gemm_fp16_accumulate_rz(size_t m, size_t n, size_t k,
                  Bs[threadIdx.y][threadIdx.x] = T(0);
            }
      
-
+          __syncthreads();
            for (int n = 0; n < TILE_DIM; ++n){
                T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
                // get sign of mul
@@ -1878,7 +1878,7 @@ __global__ void sea_gemm_bf16_accumulate_rz(size_t m, size_t n, size_t k,
                  Bs[threadIdx.y][threadIdx.x] = T(0);
            }
      
-
+          __syncthreads();
            for (int n = 0; n < TILE_DIM; ++n){
                T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
                // get sign of mul
@@ -1929,7 +1929,7 @@ __global__ void sea_gemm_bf16_accmulate(size_t m, size_t n, size_t k,
                     Bs[threadIdx.y][threadIdx.x] = T(0);
                }
           
-     
+               __syncthreads();
                for (int n = 0; n < TILE_DIM; ++n){
                     T mul = As[threadIdx.y][n]*Bs[n][threadIdx.x];
                     // get sign of mul
