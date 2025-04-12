@@ -6,8 +6,17 @@ from python.keras.layers.amdenselayer import denseam
 
 
 (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+
+# Data Augmentation
+data_augmentation = tf.keras.Sequential([
+    tf.keras.layers.RandomFlip("horizontal"),
+    tf.keras.layers.RandomRotation(0.1),
+    tf.keras.layers.RandomZoom(0.1),
+])
+
 x_train = x_train.astype('float32') / 255.0
 x_test = x_test.astype('float32') / 255.0
+x_train = data_augmentation(x_train)
 
 # Adjust y_train and y_test to ensure they are properly formatted for training
 y_train = tf.keras.utils.to_categorical(y_train, num_classes=10).astype('float32')
@@ -51,9 +60,17 @@ def resnet(input_shape=(32, 32, 3), num_classes=10):
     x = AMConv2D(64, kernel_size=3, strides=1, padding='same', activation='swish', 
                  kernel_initializer=HeNormal(), mant_mul_lut=lut_file)(inputs)
     x = tf.keras.layers.BatchNormalization()(x)
-
-    # Residual Blocks
+    
     x = residual_block(x, 64)
+    x = residual_block(x, 64)
+
+    # # Add more residual blocks with increasing filters
+    # x = residual_block(x, 128, stride=2, use_downsample=True)
+    # x = residual_block(x, 128)
+    # x = residual_block(x, 256, stride=2, use_downsample=True)
+    # x = residual_block(x, 256)
+    # x = residual_block(x, 512, stride=2, use_downsample=True)
+    # x = residual_block(x, 512)
     # x = residual_block(x, 64)
 
     # # # Add more residual blocks with increasing filters
@@ -75,14 +92,14 @@ def resnet(input_shape=(32, 32, 3), num_classes=10):
 
     return tf.keras.Model(inputs, outputs)
 
-
 # Define learning rate schedule
-# lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
-#     initial_learning_rate=0.01,  # Increased initial learning rate
-#     first_decay_steps=10000,    # Increased decay steps for smoother decay
-#     t_mul=2.0,
-#     m_mul=0.8,                  # Adjusted multiplier for more gradual decay
-#     alpha=0.00001               # Lowered alpha for a smaller final learning rate
+lr_schedule = tf.keras.optimizers.schedules.CosineDecayRestarts(
+    initial_learning_rate=0.01,  # Increased initial learning rate
+    first_decay_steps=5000,      # Adjusted decay steps for smoother learning
+    t_mul=2.0,
+    m_mul=0.9,                   # Gradual decay multiplier
+    alpha=0.00001                # Lower final learning rate
+)
 # )
 
 # Define learning rate schedule
