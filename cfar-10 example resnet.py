@@ -23,10 +23,12 @@ def residual_block(inputs, filters, stride=1, use_downsample=False):
     x = AMConv2D(filters, kernel_size=3, strides=stride, padding='same', activation='swish', 
                  kernel_initializer=HeNormal(), mant_mul_lut=lut_file)(inputs)
     x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Activation('swish')(x)
 
     x = AMConv2D(filters, kernel_size=3, padding='same', activation=None, 
                  kernel_initializer=HeNormal(), mant_mul_lut=lut_file)(x)
+    x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.BatchNormalization()(x)
 
     shortcut = inputs
@@ -52,11 +54,11 @@ def resnet(input_shape=(32, 32, 3), num_classes=10):
 
     # Residual Blocks
     x = residual_block(x, 64)
-    x = residual_block(x, 64)
+    # x = residual_block(x, 64)
 
-    # # Add more residual blocks with increasing filters
-    x = residual_block(x, 128, stride=2, use_downsample=True)
-    x = residual_block(x, 128)
+    # # # Add more residual blocks with increasing filters
+    # x = residual_block(x, 128, stride=2, use_downsample=True)
+    # x = residual_block(x, 128)
     # x = residual_block(x, 256, stride=2, use_downsample=True)
     # x = residual_block(x, 256)
     # x = residual_block(x, 512, stride=2, use_downsample=True)
