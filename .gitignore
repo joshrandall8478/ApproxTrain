@@ -79,3 +79,6 @@ sparsity_acc_all
 lut/*.bin
 *.bin
 *.pdf
+
+
+nohup.out
