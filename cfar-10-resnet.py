@@ -68,7 +68,7 @@ def resnet(input_shape=(32, 32, 3), num_classes=10):
     x = tf.keras.layers.BatchNormalization()(x)
     
     x = residual_block(x, 64)
-    x = residual_block(x, 64)
+    # x = residual_block(x, 64, stride=2, use_downsample=True)
 
     # # Add more residual blocks with increasing filters
     # x = residual_block(x, 128, stride=2, use_downsample=True)
