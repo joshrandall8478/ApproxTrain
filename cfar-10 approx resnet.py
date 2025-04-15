@@ -3,7 +3,7 @@ import tensorflow_datasets as tfds
 import sys
 from python.keras.layers.am_convolutional import AMConv2D
 from python.keras.layers.amdenselayer import denseam
-
+import argparse
 
 (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
 
@@ -23,10 +23,16 @@ y_train = tf.keras.utils.to_categorical(y_train, num_classes=10).astype('float32
 y_test = tf.keras.utils.to_categorical(y_test, num_classes=10).astype('float32')
 
 
-lut_file = "lut/MBM_7.bin"
+parser = argparse.ArgumentParser(description='Path to the LUT file')
+parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
+args = parser.parse_args()
+lut_file = args.mul
+
+print("Lut file: " + lut_file)
 
 from tensorflow.keras.initializers import HeNormal
 # Residual Block with Approximate Conv2D
+
 
 def residual_block(inputs, filters, stride=1, use_downsample=False):
     x = AMConv2D(filters, kernel_size=3, strides=stride, padding='same', activation='swish', 

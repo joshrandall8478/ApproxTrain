@@ -3,7 +3,7 @@ import tensorflow_datasets as tfds
 import sys
 from python.keras.layers.am_convolutional import AMConv2D
 from python.keras.layers.amdenselayer import denseam
-
+import argparse
 
 #VGG 16   uses cfar10
 
@@ -11,7 +11,12 @@ from python.keras.layers.amdenselayer import denseam
 x_train = x_train.astype('float32') / 255.0
 x_test = x_test.astype('float32') / 255.0
 
-lut_file = "lut/MBM_7.bin"
+parser = argparse.ArgumentParser(description='Path to the LUT file')
+parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
+args = parser.parse_args()
+lut_file = args.mul
+
+print("Lut file: " + lut_file)
 
 
 def vgg(input_shape=(32,32,3),num_classes=10):
@@ -19,18 +24,18 @@ def vgg(input_shape=(32,32,3),num_classes=10):
 
 # block 1
 
-    model.add(AMConv2D(filters=64, kernel_size=3, padding='same', activation='relu', mant_mul_lut="lut/MBM_7.bin"))
-    model.add(AMConv2D(filters=64, kernel_size=3, padding='same', activation='relu', mant_mul_lut="lut/MBM_7.bin"))
+    model.add(AMConv2D(filters=64, kernel_size=3, padding='same', activation='relu', mant_mul_lut=lut_file))
+    model.add(AMConv2D(filters=64, kernel_size=3, padding='same', activation='relu', mant_mul_lut=lut_file))
     model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
 
 #Block 2
-    model.add(AMConv2D(filters=128, kernel_size=3, padding='same', activation='relu', mant_mul_lut="lut/MBM_7.bin"))
-    model.add(AMConv2D(filters=128, kernel_size=3, padding='same', activation='relu', mant_mul_lut="lut/MBM_7.bin"))
+    model.add(AMConv2D(filters=128, kernel_size=3, padding='same', activation='relu', mant_mul_lut=lut_file))
+    model.add(AMConv2D(filters=128, kernel_size=3, padding='same', activation='relu', mant_mul_lut=lut_file))
     model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
 
 #Block 3
-    model.add(AMConv2D(filters=256, kernel_size=3, padding='same', activation='relu', mant_mul_lut="lut/MBM_7.bin"))
-    model.add(AMConv2D(filters=256, kernel_size=3, padding='same', activation='relu', mant_mul_lut="lut/MBM_7.bin"))
+    model.add(AMConv2D(filters=256, kernel_size=3, padding='same', activation='relu', mant_mul_lut=lut_file))
+    model.add(AMConv2D(filters=256, kernel_size=3, padding='same', activation='relu', mant_mul_lut=lut_file))
     model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
 
 #fully connected layers
