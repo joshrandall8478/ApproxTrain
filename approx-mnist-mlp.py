@@ -47,7 +47,27 @@ model.compile(
 # Train the model
 model.fit(
     ds_train,
-    epochs=2,
+    epochs=12,
     validation_data=ds_test,
 )
 
+import os
+import matplotlib.pyplot as plt
+
+# Plot training and validation accuracy
+history = model.history.history
+plt.plot(history['val_sparse_categorical_accuracy'], label='Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.title('MLP MNIST - ' + lut_file)
+plt.legend()
+# plt.show()
+# Save the plot as a PNG file to the "plots" directory
+
+# Ensure the "plots" directory exists
+os.makedirs("plots", exist_ok=True)
+
+# Save the plot
+plot_filename = "plots/mlp_mnist_" + os.path.basename(lut_file) + ".png"
+plt.savefig(plot_filename)
+print(f"Plot saved to {plot_filename}")

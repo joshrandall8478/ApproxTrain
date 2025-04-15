@@ -3,7 +3,7 @@ import tensorflow_datasets as tfds
 import sys
 from python.keras.layers.am_convolutional import AMConv2D
 from python.keras.layers.amdenselayer import denseam
-import argparse
+
 
 (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
 
@@ -22,7 +22,7 @@ x_train = data_augmentation(x_train)
 y_train = tf.keras.utils.to_categorical(y_train, num_classes=10).astype('float32')
 y_test = tf.keras.utils.to_categorical(y_test, num_classes=10).astype('float32')
 
-
+import argparse
 parser = argparse.ArgumentParser(description='Path to the LUT file')
 parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
 args = parser.parse_args()
@@ -129,8 +129,30 @@ model.compile(optimizer=optimizer,
               loss=loss,
               metrics=['accuracy'])
 
-model.fit(x_train, y_train, epochs=20, batch_size=64, validation_split=0.1)
+model.fit(x_train, y_train, epochs=2, batch_size=64, validation_split=0.1)
 
 # Evaluate the model
 test_loss, test_acc = model.evaluate(x_test, y_test)
 print("Test accuracy:", test_acc)
+
+
+import os
+import matplotlib.pyplot as plt
+
+# Plot training and validation accuracy
+history = model.history.history
+plt.plot(history['val_accuracy'], label='Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.title('Resnet Josh Cifar 10 - ' + lut_file)
+plt.legend()
+# plt.show()
+# Save the plot as a PNG file to the "plots" directory
+
+# Ensure the "plots" directory exists
+os.makedirs("plots", exist_ok=True)
+
+# Save the plot
+plot_filename = "plots/resnet_josh_cifar_10_" + os.path.basename(lut_file) + ".png"
+plt.savefig(plot_filename)
+print(f"Plot saved to {plot_filename}")
