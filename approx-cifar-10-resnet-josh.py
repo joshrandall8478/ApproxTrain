@@ -22,13 +22,14 @@ x_train = data_augmentation(x_train)
 y_train = tf.keras.utils.to_categorical(y_train, num_classes=10).astype('float32')
 y_test = tf.keras.utils.to_categorical(y_test, num_classes=10).astype('float32')
 
-import argparse
-parser = argparse.ArgumentParser(description='Path to the LUT file')
-parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
-args = parser.parse_args()
-lut_file = args.mul
+# import argparse
+# parser = argparse.ArgumentParser(description='Path to the LUT file')
+# parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
+# args = parser.parse_args()
+# lut_file = args.mul
 
-print("Lut file: " + lut_file)
+# print("Lut file: " + lut_file)
+lut_file = "lut/MBM_7.bin"
 
 from tensorflow.keras.initializers import HeNormal
 # Residual Block with Approximate Conv2D
@@ -136,23 +137,23 @@ test_loss, test_acc = model.evaluate(x_test, y_test)
 print("Test accuracy:", test_acc)
 
 
-import os
-import matplotlib.pyplot as plt
+# import os
+# import matplotlib.pyplot as plt
 
-# Plot training and validation accuracy
-history = model.history.history
-plt.plot(history['val_accuracy'], label='Validation Accuracy')
-plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.title('Resnet Josh Cifar 10 - ' + lut_file)
-plt.legend()
-# plt.show()
-# Save the plot as a PNG file to the "plots" directory
+# # Plot training and validation accuracy
+# history = model.history
+# plt.plot(history['val_accuracy'], label='Validation Accuracy')
+# plt.xlabel('Epochs')
+# plt.ylabel('Accuracy')
+# plt.title('Resnet Josh Cifar 10 - ' + lut_file)
+# plt.legend()
+# # plt.show()
+# # Save the plot as a PNG file to the "plots" directory
 
-# Ensure the "plots" directory exists
-os.makedirs("plots", exist_ok=True)
+# # Ensure the "plots" directory exists
+# os.makedirs("plots", exist_ok=True)
 
-# Save the plot
-plot_filename = "plots/resnet_josh_cifar_10_" + os.path.basename(lut_file) + ".png"
-plt.savefig(plot_filename)
-print(f"Plot saved to {plot_filename}")
+# # Save the plot
+# plot_filename = "plots/resnet_josh_cifar_10_" + os.path.basename(lut_file) + ".png"
+# plt.savefig(plot_filename)
+# print(f"Plot saved to {plot_filename}")

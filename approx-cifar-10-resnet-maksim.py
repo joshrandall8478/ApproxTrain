@@ -30,13 +30,14 @@ def convolutional_block(x, filters, lut_file):
     x = tf.keras.layers.Activation('relu')(x)
     return x
 
-import argparse
-parser = argparse.ArgumentParser(description='Path to the LUT file')
-parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
-args = parser.parse_args()
-lut_file = args.mul
+# import argparse
+# parser = argparse.ArgumentParser(description='Path to the LUT file')
+# parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
+# args = parser.parse_args()
+# lut_file = args.mul
 
-print("Lut file: " + lut_file)
+# print("Lut file: " + lut_file)
+lut_file = "lut/MBM_7.bin"
 
 def ResNetCIFAR(shape=(32, 32, 3), classes=10, lut_file=lut_file):
     # For CIFAR-10, use a 3x3 conv instead of the 7x7 variant.
@@ -108,23 +109,23 @@ model.fit(train_ds,
 test_loss, test_acc = model.evaluate(val_ds)
 print(f"Test accuracy: {test_acc}")
 
-import os
-import matplotlib.pyplot as plt
+# import os
+# import matplotlib.pyplot as plt
 
-# Plot training and validation accuracy
-history = model.history.history
-plt.plot(history['val_accuracy'], label='Validation Accuracy')
-plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.title('Resnet Maksim Cifar 10 - ' + lut_file)
-plt.legend()
-# plt.show()
-# Save the plot as a PNG file to the "plots" directory
+# # Plot training and validation accuracy
+# history = model.history.history
+# plt.plot(history['val_accuracy'], label='Validation Accuracy')
+# plt.xlabel('Epochs')
+# plt.ylabel('Accuracy')
+# plt.title('Resnet Maksim Cifar 10 - ' + lut_file)
+# plt.legend()
+# # plt.show()
+# # Save the plot as a PNG file to the "plots" directory
 
-# Ensure the "plots" directory exists
-os.makedirs("plots", exist_ok=True)
+# # Ensure the "plots" directory exists
+# os.makedirs("plots", exist_ok=True)
 
-# Save the plot
-plot_filename = "plots/resnet_maksim_cifar_10_" + os.path.basename(lut_file) + ".png"
-plt.savefig(plot_filename)
-print(f"Plot saved to {plot_filename}")
+# # Save the plot
+# plot_filename = "plots/resnet_maksim_cifar_10_" + os.path.basename(lut_file) + ".png"
+# plt.savefig(plot_filename)
+# print(f"Plot saved to {plot_filename}")

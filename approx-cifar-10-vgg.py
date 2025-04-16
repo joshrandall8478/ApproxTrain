@@ -11,13 +11,14 @@ from python.keras.layers.amdenselayer import denseam
 x_train = x_train.astype('float32') / 255.0
 x_test = x_test.astype('float32') / 255.0
 
-import argparse
-parser = argparse.ArgumentParser(description='Path to the LUT file')
-parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
-args = parser.parse_args()
-lut_file = args.mul
+# import argparse
+# parser = argparse.ArgumentParser(description='Path to the LUT file')
+# parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
+# args = parser.parse_args()
+# lut_file = args.mul
 
-print("Lut file: " + lut_file)
+# print("Lut file: " + lut_file)
+lut_file = "lut/MBM_7.bin"
 
 
 def vgg(input_shape=(32,32,3),num_classes=100):
@@ -64,23 +65,23 @@ model.fit(x_train, y_train, epochs=12, batch_size=64, validation_split=0.1)
 test_loss, test_acc = model.evaluate(x_test, y_test)
 print("Test accuracy:", test_acc)
 
-import os
-import matplotlib.pyplot as plt
+# import os
+# import matplotlib.pyplot as plt
 
-# Plot training and validation accuracy
-history = model.history.history
-plt.plot(history['val_accuracy'], label='Validation Accuracy')
-plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.title('VGG Cifar 10 - ' + lut_file)
-plt.legend()
-# plt.show()
-# Save the plot as a PNG file to the "plots" directory
+# # Plot training and validation accuracy
+# history = model.history.history
+# plt.plot(history['val_accuracy'], label='Validation Accuracy')
+# plt.xlabel('Epochs')
+# plt.ylabel('Accuracy')
+# plt.title('VGG Cifar 10 - ' + lut_file)
+# plt.legend()
+# # plt.show()
+# # Save the plot as a PNG file to the "plots" directory
 
-# Ensure the "plots" directory exists
-os.makedirs("plots", exist_ok=True)
+# # Ensure the "plots" directory exists
+# os.makedirs("plots", exist_ok=True)
 
-# Save the plot
-plot_filename = "plots/vgg_cifar_10_" + os.path.basename(lut_file) + ".png"
-plt.savefig(plot_filename)
-print(f"Plot saved to {plot_filename}")
+# # Save the plot
+# plot_filename = "plots/vgg_cifar_10_" + os.path.basename(lut_file) + ".png"
+# plt.savefig(plot_filename)
+# print(f"Plot saved to {plot_filename}")

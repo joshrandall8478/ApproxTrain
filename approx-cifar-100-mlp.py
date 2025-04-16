@@ -24,13 +24,14 @@ ds_train = ds_train.cache().shuffle(ds_info.splits['train'].num_examples).batch(
 ds_test = ds_test.map(normalize_img, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 ds_test = ds_test.cache().batch(128).prefetch(tf.data.experimental.AUTOTUNE)
 
-import argparse
-parser = argparse.ArgumentParser(description='Path to the LUT file')
-parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
-args = parser.parse_args()
-lut_file = args.mul
+# import argparse
+# parser = argparse.ArgumentParser(description='Path to the LUT file')
+# parser.add_argument('--mul', type=str, required=True, help='Path to the LUT file')
+# args = parser.parse_args()
+# lut_file = args.mul
 
-print("Lut file: " + lut_file)
+# print("Lut file: " + lut_file)
+lut_file = "lut/MBM_7.bin"
 
 # MLP model for CIFAR-100
 model = tf.keras.models.Sequential([
@@ -69,23 +70,23 @@ model.fit(
 )
 
 
-import os
-import matplotlib.pyplot as plt
+# import os
+# import matplotlib.pyplot as plt
 
-# Plot training and validation accuracy
-history = model.history.history
-plt.plot(history['val_sparse_categorical_accuracy'], label='Validation Accuracy')
-plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.title('MLP Cifar 100 - ' + lut_file)
-plt.legend()
-# plt.show()
-# Save the plot as a PNG file to the "plots" directory
+# # Plot training and validation accuracy
+# history = model.history.history
+# plt.plot(history['val_sparse_categorical_accuracy'], label='Validation Accuracy')
+# plt.xlabel('Epochs')
+# plt.ylabel('Accuracy')
+# plt.title('MLP Cifar 100 - ' + lut_file)
+# plt.legend()
+# # plt.show()
+# # Save the plot as a PNG file to the "plots" directory
 
-# Ensure the "plots" directory exists
-os.makedirs("plots", exist_ok=True)
+# # Ensure the "plots" directory exists
+# os.makedirs("plots", exist_ok=True)
 
-# Save the plot
-plot_filename = "plots/mlp_cifar_100_" + os.path.basename(lut_file) + ".png"
-plt.savefig(plot_filename)
-print(f"Plot saved to {plot_filename}")
+# # Save the plot
+# plot_filename = "plots/mlp_cifar_100_" + os.path.basename(lut_file) + ".png"
+# plt.savefig(plot_filename)
+# print(f"Plot saved to {plot_filename}")
